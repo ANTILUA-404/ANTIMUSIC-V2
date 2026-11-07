@@ -15,6 +15,7 @@ import { lavalinkSupervisor } from "./lavalink/supervisor.js";
 import { log } from "./logger.js";
 import { MusicService } from "./music/service.js";
 import { flushState, state } from "./state.js";
+import { oneLine } from "./utils.js";
 import { denialPayload, whitelist } from "./whitelist.js";
 
 /* -------------------------------------------------------------------- */
@@ -45,7 +46,7 @@ const OFF_WORDS = new Set(["off", "disable", "disabled", "stop", "mati", "matika
 const STATUS_WORDS = new Set(["status", "info", "cek"]);
 
 function formatCommandError(error) {
-  const message = error?.message || String(error || "Error");
+  const message = oneLine(error?.message || String(error || "Error"), 300);
 
   if (/timeout|aborted/i.test(message)) {
     return (
@@ -189,7 +190,7 @@ client.on("interactionCreate", async (interaction) => {
         return;
     }
   } catch (error) {
-    log.error({ error: error.message, command: interaction.commandName }, "Interaction error");
+    log.error({ error: oneLine(error.message, 200), command: interaction.commandName }, "Interaction error");
 
     if (interaction.isRepliable()) {
       const content = formatCommandError(error);
@@ -293,7 +294,7 @@ client.on("messageCreate", async (message) => {
       return void (await music.radioCommand(ctx, seed ? true : null, seed));
     }
   } catch (error) {
-    log.error({ error: error.message, command }, "Prefix command error");
+    log.error({ error: oneLine(error.message, 200), command }, "Prefix command error");
     await message.reply(formatCommandError(error)).catch(() => {});
   }
 });
@@ -517,12 +518,20 @@ async function shutdown(signal) {
     await lavalinkSupervisor.stop();
   } catch {}
 
-  setTimeout(() => process.exit(0), 500).unref?.();
+  // Give stdout a tick to flush before the hard exit.
+  await new Promise((resolve) => setTimeout(resolve, 150));
   process.exit(0);
 }
 
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
+
+// Hard guarantee: no orphaned JVM, whatever kills this process.
+process.on("exit", () => {
+  try {
+    lavalinkSupervisor.killSync();
+  } catch {}
+});
 
 process.on("unhandledRejection", (reason) => {
   const message = reason?.message || String(reason);
@@ -562,12 +571,7 @@ log.info(
 if (config.lavalink.embedded) {
   // When Lavalink finally comes up, revive nodes that already gave up.
   lavalinkSupervisor.onReady = () => {
-    for (const node of music.allNodes()) {
-      if (node.connected) continue;
-      try {
-        node.connect();
-      } catch {}
-    }
+    music.reviveNodes();
   };
 
   // Start the supervisor in the background: the bot can log in to Discord
@@ -581,6 +585,15 @@ if (config.lavalink.embedded) {
 } else {
   log.info({ host: config.lavalink.host }, "Memakai Lavalink eksternal (embedded dimatikan)");
 }
+
+// Safety net: if every node is gone/disconnected while Lavalink is healthy,
+// rebuild it. Without this the bot silently loses audio until a restart.
+const nodeReviveTimer = setInterval(() => {
+  if (!lavalinkSupervisor.ready) return;
+  if (music.allNodes().some((node) => node.connected)) return;
+  music.reviveNodes();
+}, 30_000);
+nodeReviveTimer.unref?.();
 
 try {
   await client.login(config.token);

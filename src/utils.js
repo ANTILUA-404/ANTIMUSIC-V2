@@ -27,6 +27,21 @@ export function truncate(value = "", limit = 80) {
   return text.length > limit ? `${text.slice(0, Math.max(0, limit - 1))}…` : text;
 }
 
+/**
+ * Collapses a multi-line error (Lavalink sends full stack traces inside
+ * `exception.message`) into one log line.
+ *
+ * Without this the panel console gets flooded with raw Java stack frames,
+ * which is exactly what made the old logs unreadable.
+ */
+export function oneLine(value = "", limit = 200) {
+  const text = String(value ?? "")
+    .replace(/\s*\r?\n\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return truncate(text, limit);
+}
+
 export function normalizeQuery(query) {
   const trimmed = String(query ?? "").trim();
   if (/^(www\.|youtube\.com|youtu\.be|music\.youtube\.com)/i.test(trimmed)) {

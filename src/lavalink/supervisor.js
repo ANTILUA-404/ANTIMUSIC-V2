@@ -14,9 +14,15 @@ const LOG_MAX_BYTES = 8 * 1024 * 1024;
 const RESTART_BACKOFF = [2000, 5000, 10000, 20000, 30000, 60000];
 const STABLE_UPTIME_MS = 180_000;
 
+/** Grace period after spawn before the watchdog may declare the JVM dead. */
+const HEALTH_GRACE_MS = 90_000;
+const TERM_GRACE_MS = 8_000;
+const KILL_GRACE_MS = 6_000;
+const PORT_FREE_WAIT_MS = 20_000;
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function isPortOpen(port, host = "127.0.0.1", timeout = 1500) {
+export function isPortOpen(port, host = "127.0.0.1", timeout = 1500) {
   return new Promise((resolve) => {
     const socket = new net.Socket();
     let settled = false;
@@ -34,6 +40,101 @@ function isPortOpen(port, host = "127.0.0.1", timeout = 1500) {
   });
 }
 
+/** Waits until nothing is listening on `port`. Returns true when the port is free. */
+export async function waitForPortFree(port, timeoutMs = PORT_FREE_WAIT_MS) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!(await isPortOpen(port, "127.0.0.1", 900))) return true;
+    await sleep(250);
+  }
+  return !(await isPortOpen(port, "127.0.0.1", 900));
+}
+
+/**
+ * Finds the PIDs of Lavalink processes listening on `port` (Linux only).
+ *
+ * This is what makes the port reclaim safe: we only ever kill a process whose
+ * command line actually contains "Lavalink.jar". It is the difference between
+ * recovering from a crashed run and shooting a random service in the foot.
+ */
+export function findLavalinkPidsOnPort(port) {
+  if (process.platform !== "linux") return [];
+
+  const inodes = new Set();
+
+  for (const file of ["/proc/net/tcp", "/proc/net/tcp6"]) {
+    let text;
+    try {
+      text = fs.readFileSync(file, "utf8");
+    } catch {
+      continue;
+    }
+
+    for (const line of text.split("\n").slice(1)) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length < 10) continue;
+
+      const local = parts[1];
+      const state = parts[3];
+      const inode = parts[9];
+
+      // 0A == TCP_LISTEN
+      if (state !== "0A") continue;
+
+      const localPort = Number.parseInt(local.split(":").pop(), 16);
+      if (localPort === port && inode !== "0") inodes.add(inode);
+    }
+  }
+
+  if (!inodes.size) return [];
+
+  const pids = new Set();
+  let entries = [];
+  try {
+    entries = fs.readdirSync("/proc");
+  } catch {
+    return [];
+  }
+
+  for (const entry of entries) {
+    if (!/^\d+$/.test(entry)) continue;
+
+    let fds;
+    try {
+      fds = fs.readdirSync(`/proc/${entry}/fd`);
+    } catch {
+      continue;
+    }
+
+    let holdsSocket = false;
+    for (const fd of fds) {
+      let target;
+      try {
+        target = fs.readlinkSync(`/proc/${entry}/fd/${fd}`);
+      } catch {
+        continue;
+      }
+      const match = /^socket:\[(\d+)\]$/.exec(target);
+      if (match && inodes.has(match[1])) {
+        holdsSocket = true;
+        break;
+      }
+    }
+    if (!holdsSocket) continue;
+
+    let cmdline = "";
+    try {
+      cmdline = fs.readFileSync(`/proc/${entry}/cmdline`, "utf8").replace(/\0/g, " ");
+    } catch {
+      continue;
+    }
+
+    if (/Lavalink\.jar/i.test(cmdline)) pids.add(Number(entry));
+  }
+
+  return [...pids];
+}
+
 function humanSize(bytes) {
   if (!bytes) return "0 B";
   const units = ["B", "KB", "MB", "GB"];
@@ -41,7 +142,7 @@ function humanSize(bytes) {
   return `${(bytes / 1024 ** index).toFixed(1)} ${units[index]}`;
 }
 
-/** Downloads a URL to a file, following redirects, with a progress log every 5s. */
+/** Downloads a URL to a file, following redirects, with a hard timeout. */
 async function download(url, destination, label) {
   log.info({ url, label }, `Mengunduh ${label}...`);
 
@@ -80,14 +181,18 @@ function runCommand(command, args, options = {}) {
 
 export class LavalinkSupervisor {
   constructor() {
+    /** @type {import("node:child_process").ChildProcess | null} */
     this.child = null;
+    this.childStartedAt = 0;
     this.state = "idle";
     this.startedAt = 0;
     this.restartAttempts = 0;
     this.watchdogTimer = null;
     this.restartTimer = null;
-    this.startingPromise = null;
+    this.startPromise = null;
     this.failStreak = 0;
+    this.healthBusy = false;
+    this.killing = false;
     this.stopping = false;
     this.ready = false;
     this.lastError = null;
@@ -106,8 +211,9 @@ export class LavalinkSupervisor {
       state: this.state,
       ready: this.ready,
       pid: this.child?.pid ?? null,
-      uptimeMs: this.startedAt ? Date.now() - this.startedAt : 0,
+      uptimeMs: this.childStartedAt ? Date.now() - this.childStartedAt : 0,
       restarts: this.restartAttempts,
+      failStreak: this.failStreak,
       port: config.lavalink.port,
       host: config.lavalink.host,
       memoryMb: config.lavalink.memoryMb,
@@ -127,43 +233,28 @@ export class LavalinkSupervisor {
     }
 
     writeLavalinkConfig();
-
-    if (await this.probe()) {
-      this.state = "ready";
-      this.ready = true;
-      log.info(
-        { host: config.lavalink.host, port: config.lavalink.port },
-        "Lavalink sudah berjalan di port tersebut, proses lokal tidak dijalankan ulang",
-      );
-      this.onReady?.();
-      return true;
-    }
-
-    if (await isPortOpen(config.lavalink.port, "127.0.0.1")) {
-      this.state = "failed";
-      this.lastError = "port-in-use";
-      log.error(
-        { port: config.lavalink.port },
-        "Port Lavalink sudah dipakai proses lain yang bukan Lavalink milik bot. " +
-          "Hentikan proses tersebut atau ganti LAVALINK_PORT di .env.",
-      );
-      return false;
-    }
-
     return this.start();
   }
 
-  async start() {
-    if (this.startingPromise) return this.startingPromise;
+  /** Single-flight: never spawn two JVMs because two callers asked at once. */
+  start() {
+    if (this.startPromise) return this.startPromise;
 
-    this.startingPromise = this._start().finally(() => {
-      this.startingPromise = null;
+    this.startPromise = this._start().finally(() => {
+      this.startPromise = null;
     });
 
-    return this.startingPromise;
+    return this.startPromise;
   }
 
   async _start() {
+    // Already supervised and alive: calling start() twice must be a no-op.
+    // Without this guard a redundant start() tried to bind an occupied port,
+    // "failed", and burned a backoff step (attempt jumped to 2 for one crash).
+    if (this.child && this.child.exitCode === null && this.state !== "down") {
+      return this.ready;
+    }
+
     this.stopping = false;
     this.ready = false;
     this.failStreak = 0;
@@ -179,19 +270,22 @@ export class LavalinkSupervisor {
       this.javaBinary = java;
       writeLavalinkConfig();
 
+      // Free the port BEFORE spawning. A leftover JVM from the previous run is
+      // the reason the old build ended in "Port 2333 is already in use".
+      const prepared = await this.preparePort();
+      if (prepared === "adopted") return true;
+
       const { port, javaArgs } = config.lavalink;
       const args = [
         // Explicit system properties beat any SERVER_PORT env variable that
         // Pterodactyl / hosting panels inject into the container.
         `-Dserver.port=${port}`,
-        `-Dlavalink.server.port=${port}`,
         "-Dfile.encoding=UTF-8",
         ...javaArgs,
         "-jar",
         "Lavalink.jar",
         // Highest priority for Spring Boot: command line arguments.
         `--server.port=${port}`,
-        `--lavalink.server.port=${port}`,
       ];
 
       const env = { ...process.env };
@@ -202,79 +296,75 @@ export class LavalinkSupervisor {
       for (const key of Object.keys(env)) {
         if (key.startsWith("SPRING_")) delete env[key];
       }
-      env.JAVA_TOOL_OPTIONS = "";
+      // An empty JAVA_TOOL_OPTIONS makes the JVM print "Picked up ..." on every
+      // boot. Removing it entirely keeps lavalink.log clean.
+      delete env.JAVA_TOOL_OPTIONS;
 
-      log.info(
-        { java, port, memory: `${config.lavalink.memoryMb}MB` },
-        "Menjalankan server Lavalink lokal...",
-      );
+      log.info({ java, port, memory: `${config.lavalink.memoryMb}MB` }, "Menjalankan server Lavalink lokal...");
 
       const logFd = this.openLogFile();
-
-      this.child = spawn(java, args, {
-        cwd: config.paths.lavalinkDir,
-        env,
-        // stdout/stderr langsung ke file, bukan pipe.
-        // Output Lavalink (termasuk stack trace plugin YouTube saat IP server
-        // diblokir) jadi tidak membanjiri console panel, tapi tetap lengkap
-        // di lavalink/lavalink.log untuk diagnosa.
-        stdio: ["ignore", logFd, logFd],
-        windowsHide: true,
-      });
-
+      let child;
       try {
-        fs.closeSync(logFd);
-      } catch {}
+        child = spawn(java, args, {
+          cwd: config.paths.lavalinkDir,
+          env,
+          // stdout/stderr langsung ke file, bukan pipe.
+          // Output Lavalink (termasuk stack trace plugin YouTube saat IP server
+          // diblokir) jadi tidak membanjiri console panel, tapi tetap lengkap
+          // di lavalink/lavalink.log untuk diagnosa.
+          stdio: ["ignore", logFd, logFd],
+          windowsHide: true,
+          // Own process group on POSIX so killChild() can reap the whole tree.
+          detached: process.platform !== "win32",
+        });
+      } finally {
+        try {
+          fs.closeSync(logFd);
+        } catch {}
+      }
 
-      this.startedAt = Date.now();
+      const spawnedAt = Date.now();
+      this.child = child;
+      this.childStartedAt = spawnedAt;
+      this.startedAt = spawnedAt;
 
-      this.child.on("error", (error) => {
+      child.on("error", (error) => {
         this.lastError = error.message;
         log.error({ error: error.message }, "Gagal menjalankan proses Java Lavalink");
       });
 
-      this.child.on("exit", (code, signal) => {
-        const uptime = Date.now() - this.startedAt;
-        this.ready = false;
-        this.state = "down";
-        this.child = null;
-
-        if (this.stopping) {
-          log.info({ code, signal }, "Proses Lavalink dihentikan");
-          return;
-        }
-
-        if (uptime > STABLE_UPTIME_MS) this.restartAttempts = 0;
-
-        log.error(
-          { code, signal, uptimeSec: Math.round(uptime / 1000) },
-          "Proses Lavalink berhenti tidak normal",
-        );
-        this.dumpLastLogs();
-        this.onDown?.();
-        this.scheduleRestart("process-exit");
-      });
+      // Bind the exit handler to THIS child instance. The previous build used
+      // `this.child`, so a late exit event from an old process nulled the
+      // reference to the new one, orphaned it, and started an endless respawn.
+      child.on("exit", (code, signal) => this.handleExit(child, spawnedAt, code, signal));
 
       this.startWatchdog();
 
-      const ok = await this.waitForReady(config.lavalink.startupTimeoutMs);
-      if (!ok) {
-        this.lastError = "startup-timeout";
-        this.dumpLastLogs();
-        log.error(
-          { timeoutMs: config.lavalink.startupTimeoutMs },
-          "Lavalink tidak siap sebelum batas waktu. Periksa log di lavalink/lavalink.log",
-        );
-        await this.killChild("startup-timeout");
-        this.scheduleRestart("startup-timeout");
+      const outcome = await this.waitForReady(child, config.lavalink.startupTimeoutMs);
+
+      if (outcome === "ready") {
+        this.ready = true;
+        this.state = "ready";
+        log.info({ port }, "Server Lavalink lokal siap menerima koneksi");
+        this.onReady?.();
+        return true;
+      }
+
+      if (outcome === "exited") {
+        // handleExit() already logged the reason and scheduled a restart.
+        this.lastError = "process-exited-during-startup";
         return false;
       }
 
-      this.ready = true;
-      this.state = "ready";
-      log.info({ port }, "Server Lavalink lokal siap menerima koneksi");
-      this.onReady?.();
-      return true;
+      this.lastError = "startup-timeout";
+      this.dumpLastLogs();
+      log.error(
+        { timeoutMs: config.lavalink.startupTimeoutMs },
+        "Lavalink tidak siap sebelum batas waktu. Periksa log di lavalink/lavalink.log",
+      );
+      await this.killChild("startup-timeout");
+      this.scheduleRestart("startup-timeout");
+      return false;
     } catch (error) {
       this.lastError = error.message;
       this.state = "failed";
@@ -285,10 +375,66 @@ export class LavalinkSupervisor {
   }
 
   /* ---------------------------------------------------------------- */
+  /* port                                                             */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Makes sure nothing else is holding the Lavalink port.
+   *
+   * A previous run that was killed by the panel can leave a JVM behind. That
+   * JVM keeps answering /version, so the bot happily "connects" to a process it
+   * does not control, then everything falls apart when it finally dies.
+   */
+  async preparePort() {
+    const port = config.lavalink.port;
+
+    if (!(await isPortOpen(port, "127.0.0.1", 1200))) return true;
+
+    // Never touch another process when reclaim is disabled (user runs their
+    // own Lavalink next to the bot and only wants us to reuse it).
+    const pids = config.lavalink.reclaimPort ? findLavalinkPidsOnPort(port) : [];
+
+    if (pids.length) {
+      log.warn({ port, pids }, "Port Lavalink ditahan sisa proses Lavalink lama, membebaskan port");
+      for (const pid of pids) {
+        try {
+          process.kill(pid, "SIGTERM");
+        } catch {}
+      }
+
+      await sleep(1500);
+
+      for (const pid of pids) {
+        try {
+          process.kill(pid, 0); // still alive?
+          process.kill(pid, "SIGKILL");
+        } catch {}
+      }
+
+      if (await waitForPortFree(port, 10_000)) return true;
+    }
+
+    if (!config.lavalink.reclaimPort && (await this.probe(5000))) {
+      log.info({ port }, "Memakai Lavalink yang sudah berjalan (LAVALINK_RECLAIM_PORT=false)");
+      this.state = "ready";
+      this.ready = true;
+      this.startedAt = Date.now();
+      this.onReady?.();
+      return "adopted";
+    }
+
+    if (await waitForPortFree(port, PORT_FREE_WAIT_MS)) return true;
+
+    throw new Error(
+      `Port ${port} masih dipakai proses lain. Hentikan proses tersebut atau ganti LAVALINK_PORT di .env.`,
+    );
+  }
+
+  /* ---------------------------------------------------------------- */
   /* readiness                                                        */
   /* ---------------------------------------------------------------- */
 
-  async probe(timeout = 2500) {
+  async probe(timeout = 5000) {
     const url = `http${config.lavalink.secure ? "s" : ""}://${config.lavalink.host}:${config.lavalink.port}/version`;
     try {
       const response = await fetch(url, {
@@ -301,6 +447,16 @@ export class LavalinkSupervisor {
     } catch {
       return false;
     }
+  }
+
+  /** One probe can time out while the JVM is busy parsing a playlist. */
+  async probeWithRetry() {
+    const attempts = Math.max(1, config.lavalink.healthProbeAttempts);
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      if (await this.probe(config.lavalink.healthProbeTimeoutMs)) return true;
+      if (attempt < attempts) await sleep(1200);
+    }
+    return false;
   }
 
   /** Short, user-facing wait so the first command can succeed during boot. */
@@ -316,17 +472,26 @@ export class LavalinkSupervisor {
     return this.ready;
   }
 
-  async waitForReady(timeoutMs) {
+  /**
+   * @returns {Promise<"ready" | "exited" | "timeout">}
+   */
+  async waitForReady(child, timeoutMs) {
     const startedAt = Date.now();
     let lastNotice = 0;
 
     while (Date.now() - startedAt < timeoutMs) {
-      if (!this.child) return false;
+      if (this.child !== child || child.exitCode !== null || child.signalCode !== null) {
+        return "exited";
+      }
 
-      if (await this.probe()) return true;
+      if (await this.probe(config.lavalink.healthProbeTimeoutMs)) {
+        // A late exit can land between the probe and this line.
+        if (this.child === child && child.exitCode === null) return "ready";
+        return "exited";
+      }
 
       const elapsed = Date.now() - startedAt;
-      if (elapsed - lastNotice >= 15000) {
+      if (elapsed - lastNotice >= 15_000) {
         lastNotice = elapsed;
         log.info({ elapsedSec: Math.round(elapsed / 1000) }, "Menunggu Lavalink siap...");
       }
@@ -334,7 +499,7 @@ export class LavalinkSupervisor {
       await sleep(1000);
     }
 
-    return false;
+    return "timeout";
   }
 
   /* ---------------------------------------------------------------- */
@@ -378,44 +543,208 @@ export class LavalinkSupervisor {
   }
 
   /* ---------------------------------------------------------------- */
+  /* process lifecycle                                                */
+  /* ---------------------------------------------------------------- */
+
+  handleExit(child, spawnedAt, code, signal) {
+    const uptime = Date.now() - spawnedAt;
+
+    // Exit event from a process we already replaced: ignore it completely.
+    // This single guard is what stops the respawn storm.
+    if (this.child !== child) {
+      log.debug({ pid: child.pid, code, signal }, "Proses Lavalink lama sudah berhenti (diabaikan)");
+      return;
+    }
+
+    this.child = null;
+    this.childStartedAt = 0;
+    this.ready = false;
+    this.failStreak = 0;
+
+    if (this.stopping || this.state === "stopped") {
+      this.state = "stopped";
+      log.info({ code, signal }, "Proses Lavalink dihentikan");
+      return;
+    }
+
+    this.state = "down";
+
+    if (uptime > STABLE_UPTIME_MS) this.restartAttempts = 0;
+
+    // Deliberate kill (watchdog / startup timeout): the caller already logged
+    // the reason and schedules the restart. Dumping 25 log lines here would
+    // flood the panel on every controlled restart.
+    if (this.killing) {
+      log.info({ code, signal, uptimeSec: Math.round(uptime / 1000) }, "Proses Lavalink dihentikan");
+      return;
+    }
+
+    log.error(
+      { code, signal, uptimeSec: Math.round(uptime / 1000) },
+      "Proses Lavalink berhenti tidak normal",
+    );
+    this.dumpLastLogs();
+    this.onDown?.();
+    this.scheduleRestart("process-exit");
+  }
+
+  async waitForExit(child, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (child.exitCode !== null || child.signalCode !== null) return true;
+      await sleep(150);
+    }
+    return child.exitCode !== null || child.signalCode !== null;
+  }
+
+  killTree(child, signal) {
+    if (!child?.pid) return;
+
+    if (process.platform !== "win32") {
+      // Negative pid == the whole process group (detached spawn).
+      try {
+        process.kill(-child.pid, signal);
+      } catch {}
+    }
+
+    try {
+      child.kill(signal);
+    } catch {}
+  }
+
+  async killChild(reason) {
+    const child = this.child;
+
+    if (!child) {
+      await waitForPortFree(config.lavalink.port, 5000);
+      return;
+    }
+
+    log.warn({ pid: child.pid, reason }, "Menghentikan proses Lavalink");
+    this.ready = false;
+    this.killing = true;
+
+    try {
+      try {
+        child.kill("SIGTERM");
+      } catch {}
+
+      if (!(await this.waitForExit(child, TERM_GRACE_MS))) {
+        log.warn({ pid: child.pid }, "Proses Lavalink tidak berhenti, mengirim SIGKILL");
+        this.killTree(child, "SIGKILL");
+        await this.waitForExit(child, KILL_GRACE_MS);
+      }
+    } finally {
+      this.killing = false;
+    }
+
+    // Only clear the reference if it is still the process we just killed.
+    if (this.child === child) {
+      this.child = null;
+      this.childStartedAt = 0;
+    }
+
+    if (!(await waitForPortFree(config.lavalink.port, PORT_FREE_WAIT_MS))) {
+      log.warn({ port: config.lavalink.port }, "Port Lavalink masih ditahan setelah proses dihentikan");
+    }
+  }
+
+  /**
+   * Last-resort synchronous cleanup for `process.on("exit")`.
+   *
+   * Without it, a crash or a panel stop that does not wait for async shutdown
+   * leaves an orphaned JVM behind — exactly what produced the
+   * "Port 2333 is already in use" loop.
+   */
+  killSync() {
+    const child = this.child;
+    if (!child) return;
+
+    this.stopping = true;
+    this.killTree(child, "SIGKILL");
+    this.child = null;
+  }
+
+  /* ---------------------------------------------------------------- */
   /* watchdog / restart                                               */
   /* ---------------------------------------------------------------- */
 
   startWatchdog() {
     if (this.watchdogTimer) return;
 
-    this.watchdogTimer = setInterval(async () => {
-      if (this.stopping || !config.lavalink.autoRestart) return;
+    this.watchdogTimer = setInterval(() => {
+      void this.healthTick();
+    }, config.lavalink.healthCheckIntervalMs);
 
+    this.watchdogTimer.unref?.();
+  }
+
+  async healthTick() {
+    // The interval can fire while the previous tick is still awaiting a probe.
+    // Overlapping ticks were killing the same JVM twice and scheduling two
+    // restarts (attempt=1 then attempt=2 three seconds apart).
+    if (this.healthBusy) return;
+    if (this.stopping || !config.lavalink.autoRestart) return;
+
+    this.healthBusy = true;
+
+    try {
       if (!this.child) {
-        this.scheduleRestart("watchdog-missing-process");
-        return;
-      }
-
-      if (this.state === "starting") return;
-
-      const ok = await this.probe(3000);
-      if (ok) {
-        this.failStreak = 0;
-        if (this.state !== "ready") {
-          this.state = "ready";
-          this.ready = true;
+        if (!this.startPromise && !this.restartTimer) {
+          this.scheduleRestart("watchdog-missing-process");
         }
         return;
       }
 
-      this.failStreak += 1;
-      log.warn({ failStreak: this.failStreak }, "Lavalink tidak merespons pemeriksaan kesehatan");
+      if (this.state === "starting") return;
+      if (Date.now() - this.childStartedAt < HEALTH_GRACE_MS) return;
 
-      if (this.failStreak >= 3) {
-        this.state = "unhealthy";
-        this.ready = false;
-        await this.killChild("unhealthy");
-        this.scheduleRestart("unhealthy");
+      const child = this.child;
+
+      if (await this.probeWithRetry()) {
+        const recovered = this.failStreak > 0;
+        this.failStreak = 0;
+
+        if (this.state !== "ready") {
+          this.state = "ready";
+          this.ready = true;
+        }
+
+        if (Date.now() - this.childStartedAt > STABLE_UPTIME_MS) this.restartAttempts = 0;
+
+        if (recovered) {
+          log.info({ node: "Lavalink-Primary" }, "Lavalink merespons kembali");
+          this.onReady?.();
+        }
+        return;
       }
-    }, 10_000);
 
-    this.watchdogTimer.unref?.();
+      // The child died while we were probing: handleExit() owns the restart.
+      if (this.child !== child || child.exitCode !== null) return;
+
+      this.failStreak += 1;
+
+      if (this.failStreak < config.lavalink.healthFailThreshold) {
+        if (this.failStreak === 1) {
+          log.info(
+            { failStreak: this.failStreak },
+            "Lavalink lambat merespons pemeriksaan kesehatan, memantau ulang",
+          );
+        }
+        return;
+      }
+
+      log.warn(
+        { failStreak: this.failStreak, pid: child.pid },
+        "Lavalink tidak merespons, menjalankan ulang proses",
+      );
+      this.state = "unhealthy";
+      this.ready = false;
+      await this.killChild("unhealthy");
+      this.scheduleRestart("unhealthy");
+    } finally {
+      this.healthBusy = false;
+    }
   }
 
   scheduleRestart(reason) {
@@ -426,39 +755,25 @@ export class LavalinkSupervisor {
     this.restartAttempts += 1;
     this.state = "restarting";
 
-    log.warn(
-      { reason, attempt: this.restartAttempts, delayMs: delay },
-      "Menjadwalkan restart Lavalink",
-    );
+    log.warn({ reason, attempt: this.restartAttempts, delayMs: delay }, "Menjadwalkan restart Lavalink");
 
     this.restartTimer = setTimeout(async () => {
       this.restartTimer = null;
       if (this.stopping) return;
+      if (this.child) return;
+
+      // A start may still be finishing (it schedules its own retry on failure).
+      if (this.startPromise) {
+        try {
+          await this.startPromise;
+        } catch {}
+        if (this.stopping || this.child) return;
+      }
+
       await this.start();
     }, delay);
+
     this.restartTimer.unref?.();
-  }
-
-  async killChild(reason) {
-    const child = this.child;
-    if (!child) return;
-
-    log.warn({ pid: child.pid, reason }, "Menghentikan proses Lavalink");
-    try {
-      child.kill("SIGTERM");
-    } catch {}
-
-    const deadline = Date.now() + 8000;
-    while (this.child && Date.now() < deadline) {
-      await sleep(200);
-    }
-
-    if (this.child) {
-      try {
-        this.child.kill("SIGKILL");
-      } catch {}
-      this.child = null;
-    }
   }
 
   async stop() {
@@ -554,14 +869,11 @@ export class LavalinkSupervisor {
     }
 
     if (isWindows) {
-      log.error(
-        "Java 17+ tidak ditemukan. Install Java 17 atau set LAVALINK_JAVA_BIN ke java.exe.",
-      );
+      log.error("Java 17+ tidak ditemukan. Install Java 17 atau set LAVALINK_JAVA_BIN ke java.exe.");
       return null;
     }
 
-    const installed = await this.installPortableJre();
-    return installed;
+    return this.installPortableJre();
   }
 
   async installPortableJre() {

@@ -101,7 +101,8 @@ Lavalink ke VPS lain, baca **[docs/HOSTING.md](docs/HOSTING.md)**.
 npm test
 ```
 
-17 test inti (parser link, deteksi error YouTube, circuit breaker, generator config)
+21 test inti (parser link, deteksi error YouTube, circuit breaker, generator config,
+helper port supervisor)
 jalan tanpa perlu token, Discord, atau Lavalink. Cocok juga untuk CI.
 
 ---
@@ -268,7 +269,7 @@ src/
     service.js               player, queue, command, failover
     radio.js                 engine mode 24/7
     links.js                 resolver Spotify / Apple Music / Deezer
-test/core.test.js            17 unit test (npm test)
+test/core.test.js            21 unit test (npm test)
 scripts/doctor.js            diagnosa mandiri
 docs/HOSTING.md              Lavalink: mana yang bisa, mana yang tidak
 data/state.json              preferensi server (dibuat otomatis)
@@ -283,7 +284,8 @@ lavalink/                    Lavalink.jar, JRE, application.yml, log
 | --- | --- |
 | `ECONNREFUSED 127.0.0.1:2333` | v2 sudah memperbaikinya. Kalau masih muncul, cek `?nodes` dan log `lavalink/lavalink.log`. |
 | `401 Unauthorized` | Password beda. Set `LAVALINK_MANAGE_CONFIG=true` lalu restart (file di-generate ulang). |
-| `Port 2333 is already in use` | Ada Lavalink lain di server. Matikan, atau ganti `LAVALINK_PORT`. |
+| `Port 2333 is already in use` | v2.3.2 membebaskan port otomatis: sisa proses `Lavalink.jar` dari run sebelumnya dimatikan sebelum start (`LAVALINK_RECLAIM_PORT=true`). |
+| `Lavalink tidak merespons` berulang lalu crash loop | v2.3.2: probe diulang 2× (6s), butuh 5 kegagalan berurutan, dan ada grace 90s setelah start. Watchdog tidak bisa lagi membunuh JVM sehat atau menjadwalkan dua restart. |
 | Bot online tapi perintah bilang "server audio offline" | Lavalink masih start (1–3 menit pertama) atau JAR/JRE gagal diunduh. Cek log. |
 | `All clients failed to load the item` / `This video requires login` | **YouTube memblokir IP server.** Bot otomatis pindah ke SoundCloud. Solusi permanen: aktifkan OAuth (lihat di bawah). |
 | `must find sig function from script` | Cipher YouTube berubah. Pakai `TVHTML5_SIMPLY` (default v2.2) atau remote cipher server. |

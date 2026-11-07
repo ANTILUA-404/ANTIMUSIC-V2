@@ -129,20 +129,54 @@ const localHost = isLocalHost(lavalinkHost);
 const embedded = bool(process.env.LAVALINK_EMBEDDED, localHost) && localHost;
 
 /**
- * Memory for the embedded JVM. Pterodactyl exposes SERVER_MEMORY (MiB).
- * We never take everything: the Node process needs room too.
+ * Reads the container memory limit straight from the cgroup.
+ *
+ * Pterodactyl sets SERVER_MEMORY, but other panels (Pelican, generic Docker,
+ * plain VPS) do not. Without this the JVM could ask for more heap than the
+ * container has, get OOM-killed by the kernel, and look "unhealthy" forever.
  */
-const serverMemory = int(process.env.SERVER_MEMORY, 0);
+function detectContainerMemoryMb() {
+  const sources = [
+    "/sys/fs/cgroup/memory.max", // cgroup v2
+    "/sys/fs/cgroup/memory/memory.limit_in_bytes", // cgroup v1
+  ];
+
+  for (const file of sources) {
+    try {
+      const raw = fs.readFileSync(file, "utf8").trim();
+      if (!raw || raw === "max") continue;
+
+      const bytes = Number(raw);
+      if (!Number.isFinite(bytes) || bytes <= 0) continue;
+      // cgroup v1 reports a huge sentinel value when there is no limit.
+      if (bytes > 64 * 1024 ** 3) continue;
+
+      return Math.floor(bytes / 1024 / 1024);
+    } catch {}
+  }
+
+  return 0;
+}
+
+/**
+ * Memory for the embedded JVM. We never take everything: the Node process
+ * needs room too, and going over the container limit means SIGKILL.
+ */
+const serverMemory = int(process.env.SERVER_MEMORY, 0) || detectContainerMemoryMb();
 const memoryMb = clamp(
   int(process.env.LAVALINK_MEMORY_MB, serverMemory ? Math.max(384, Math.min(1024, Math.floor(serverMemory * 0.45))) : 512),
   256,
   4096,
 );
 
-const javaArgs = list(
-  process.env.LAVALINK_JAVA_ARGS,
-  [`-Xms${Math.max(128, Math.floor(memoryMb / 2))}M`, `-Xmx${memoryMb}M`],
-);
+const javaArgs = list(process.env.LAVALINK_JAVA_ARGS, [
+  `-Xms${Math.max(128, Math.floor(memoryMb / 2))}M`,
+  `-Xmx${memoryMb}M`,
+  // Exit instead of hanging half-dead when the heap is exhausted; the watchdog
+  // then restarts it cleanly.
+  "-XX:+ExitOnOutOfMemoryError",
+  "-Djava.awt.headless=true",
+]);
 
 function parseFallbacks(raw) {
   const text = clean(raw);
@@ -243,6 +277,22 @@ export const config = {
     javaBin: str(process.env.LAVALINK_JAVA_BIN),
     startupTimeoutMs: clamp(int(process.env.LAVALINK_STARTUP_TIMEOUT_MS, 240_000), 15_000, 900_000),
     autoRestart: bool(process.env.LAVALINK_AUTO_RESTART, true),
+
+    /* --- health check -------------------------------------------------
+     * One slow HTTP probe is normal while the JVM parses a large playlist or
+     * retries a blocked YouTube request. The old build killed the process
+     * after 3 probes with a 3s timeout, which produced false positives and
+     * a restart loop. Now: retry the probe, require several consecutive
+     * failures, and never judge a JVM that just booted.
+     * ----------------------------------------------------------------- */
+    healthCheckIntervalMs: clamp(int(process.env.LAVALINK_HEALTH_INTERVAL_MS, 15_000), 5000, 120_000),
+    healthProbeTimeoutMs: clamp(int(process.env.LAVALINK_HEALTH_TIMEOUT_MS, 6000), 1000, 30_000),
+    healthProbeAttempts: clamp(int(process.env.LAVALINK_HEALTH_ATTEMPTS, 2), 1, 5),
+    healthFailThreshold: clamp(int(process.env.LAVALINK_HEALTH_FAILS, 5), 2, 20),
+
+    /** Kill a leftover Lavalink.jar that still holds the port from a past run. */
+    reclaimPort: bool(process.env.LAVALINK_RECLAIM_PORT, true),
+
     manageConfig: bool(process.env.LAVALINK_MANAGE_CONFIG, true),
     jarVersion: str(process.env.LAVALINK_VERSION, "4.2.2"),
     youtubePlugin: str(process.env.LAVALINK_YOUTUBE_PLUGIN, "1.18.2"),

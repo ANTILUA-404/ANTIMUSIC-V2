@@ -1,6 +1,6 @@
 {
   "name": "antimusic",
-  "version": "2.3.0",
+  "version": "2.3.2",
   "private": true,
   "description": "ANTIMUSIC - Discord music bot (Discord.js + Lavalink v4) with embedded Lavalink supervisor, 24/7 radio mode and server licence whitelist",
   "type": "module",

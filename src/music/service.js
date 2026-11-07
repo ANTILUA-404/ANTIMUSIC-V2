@@ -18,6 +18,7 @@ import {
   isUrl,
   ms,
   normalizeQuery,
+  oneLine,
   parseSeconds,
   requesterName,
   successEmbed,
@@ -200,6 +201,48 @@ export class MusicService {
     return Array.from(this.lavalink.nodeManager.nodes.values());
   }
 
+  /**
+   * Keeps exactly one live node per configured Lavalink.
+   *
+   * lavalink-client deletes a node from the manager once `retryAmount`
+   * reconnects fail. After a long Lavalink outage the bot was left with zero
+   * nodes, so every command answered "server audio offline" even though
+   * Lavalink had already recovered. This rebuilds the node when that happens.
+   */
+  reviveNodes() {
+    const manager = this.lavalink?.nodeManager;
+    if (!manager) return false;
+
+    let changed = false;
+
+    for (const options of buildNodes()) {
+      const existing = manager.nodes.get(options.id);
+
+      if (!existing) {
+        try {
+          manager.createNode(options);
+          changed = true;
+          log.info({ node: options.id }, "Node Lavalink dibuat ulang");
+        } catch (error) {
+          log.warn({ node: options.id, error: error.message }, "Gagal membuat ulang node Lavalink");
+          continue;
+        }
+      }
+
+      const node = manager.nodes.get(options.id);
+      if (!node || node.connected) continue;
+
+      // The library is already retrying this one; let it finish.
+      if (node.reconnectionState === "RECONNECTING") continue;
+
+      try {
+        node.connect();
+      } catch {}
+    }
+
+    return changed;
+  }
+
   pickNode({ exclude = null } = {}) {
     const nodes = this.allNodes().filter((node) => node.id !== exclude && node.connected && node.info);
     if (!nodes.length) return null;
@@ -260,12 +303,12 @@ export class MusicService {
     this.lastYoutubeFailureAt = now;
     this.youtubeFailureStreak += 1;
 
-    if (this.youtubeFailureStreak < 3 || now < this.youtubeDegradedUntil) return;
+    if (this.youtubeFailureStreak < 2 || now < this.youtubeDegradedUntil) return;
 
     this.youtubeDegradedUntil = now + 10 * 60 * 1000;
 
     log.warn(
-      { guildId: player?.guildId, reason: truncate(reason, 120) },
+      { guildId: player?.guildId, reason: oneLine(reason, 140) },
       "YouTube memblokir IP server ini (semua client gagal). " +
         "Pencarian sementara diarahkan ke SoundCloud selama 10 menit. " +
         "Solusi permanen: YOUTUBE_OAUTH_ENABLED=true atau pakai poToken.",
@@ -351,7 +394,7 @@ export class MusicService {
       ? "YouTube memblokir pemutaran dari server ini (semua client gagal).\n" +
         "💡 **Solusi permanen:** set `YOUTUBE_OAUTH_ENABLED=true` di `.env`, restart, lalu ikuti kode OAuth di console.\n" +
         "💡 Sementara: pakai `?play sc:<judul>` untuk memutar via SoundCloud."
-      : truncate(reason, 300);
+      : oneLine(reason, 300);
 
     const channel = this.client.channels.cache.get(player.textChannelId);
     await channel
@@ -376,7 +419,13 @@ export class MusicService {
     });
 
     manager.nodeManager.on("reconnecting", (node) => {
-      log.warn({ node: node.id }, "Node Lavalink mencoba menyambung ulang");
+      // The library retries every 10s; logging each attempt floods the panel.
+      const key = `reconnect:${node.id}`;
+      const last = this.nodeCooldowns.get(key) || 0;
+      if (Date.now() - last < 60_000) return;
+
+      this.nodeCooldowns.set(key, Date.now());
+      log.info({ node: node.id }, "Node Lavalink mencoba menyambung ulang");
     });
 
     manager.nodeManager.on("error", (node, error) => {
@@ -394,7 +443,13 @@ export class MusicService {
 
     manager.nodeManager.on("disconnect", (node, reason) => {
       this.markNodeDegraded(node.id, 90_000);
-      log.warn({ node: node.id, code: reason?.code, reason: reason?.reason }, "Node Lavalink terputus");
+
+      const key = `down:${node.id}`;
+      const last = this.nodeCooldowns.get(key) || 0;
+      if (Date.now() - last > 30_000) {
+        this.nodeCooldowns.set(key, Date.now());
+        log.warn({ node: node.id, code: reason?.code, reason: reason?.reason }, "Node Lavalink terputus");
+      }
 
       // Give the node a few seconds to come back before moving players.
       setTimeout(() => {
@@ -433,11 +488,12 @@ export class MusicService {
       const reason = payload?.exception?.message || payload?.message || "Gagal memutar audio";
       const blocked = this.isYoutubeBlocked(reason);
 
+      // `reason` contains the whole Java stack trace: keep one line in the panel.
       log.warn(
         {
           guildId: player.guildId,
           track: truncate(trackTitle(track), 60),
-          reason: truncate(reason, 120),
+          reason: oneLine(reason, 160),
           youtubeBlocked: blocked,
         },
         "Track error",

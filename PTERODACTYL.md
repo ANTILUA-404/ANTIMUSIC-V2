@@ -245,7 +245,8 @@ curl -H "Authorization: antimusic-super-secret" http://127.0.0.1:2333/version
 | Log | Arti | Solusi |
 | --- | --- | --- |
 | `connect ECONNREFUSED 127.0.0.1:2333` | Lavalink belum/tidak listen di 2333 | Pastikan pakai versi ini (sudah memaksa port). Cek `lavalink/lavalink.log`. |
-| `Web server failed to start. Port xxxxx already in use` | Port bentrok | Ganti `LAVALINK_PORT`, atau matikan Lavalink lain. |
+| `Web server failed to start. Port xxxxx already in use` | Port ditahan sisa JVM dari run sebelumnya | Sejak v2.3.2 bot membunuh sisa `Lavalink.jar` sebelum start (`LAVALINK_RECLAIM_PORT=true`). Kalau masih muncul, ada proses non-Lavalink di port itu — ganti `LAVALINK_PORT`. |
+| `Lavalink tidak merespons pemeriksaan kesehatan` berulang lalu `SIGKILL` | Watchdog lama terlalu agresif (3s timeout, 3 strike) | Sudah diperbaiki di v2.3.2: probe 6s × 2, butuh 5 kegagalan berurutan, grace 90s setelah start. Kalau masih terjadi, JVM memang kehabisan RAM — naikkan `LAVALINK_MEMORY_MB`. |
 | `401 Unauthorized` dari Lavalink | Password beda | Set `LAVALINK_MANAGE_CONFIG=true`, restart → `application.yml` ditulis ulang dari `.env`. |
 | `Java belum tersedia...` lalu gagal | Unduhan JRE gagal | Coba restart (unduhan diulang otomatis 3×), atau set `LAVALINK_JAVA_BIN`. |
 | `Lavalink.jar tidak lengkap` | Unduhan terputus | Hapus `lavalink/Lavalink.jar`, restart. |

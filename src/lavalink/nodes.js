@@ -34,11 +34,12 @@ const PUBLIC_FALLBACKS = [
 ];
 
 const NODE_BEHAVIOUR = {
-  // Long enough to survive a slow first boot (jar + JRE download), but still
-  // finite: the library stops hammering instead of retrying forever.
-  retryAmount: 30,
+  // The embedded Lavalink is restarted by our own supervisor, so the library
+  // should keep retrying instead of destroying the node after ~5 minutes
+  // (a destroyed node means "no node at all" for every command).
+  retryAmount: 500,
   retryDelay: 10_000,
-  retryTimespan: 600_000,
+  retryTimespan: 3_600_000,
   requestSignalTimeoutMS: config.nodes.requestTimeoutMs,
   heartBeatInterval: 30_000,
   enablePingOnStatsCheck: true,

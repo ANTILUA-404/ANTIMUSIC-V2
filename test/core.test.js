@@ -11,9 +11,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 const { parseMusicLink, SOURCE_MANAGER, SERVICE_SEARCH_PREFIX } = await import("../src/music/links.js");
-const { ms, parseSeconds, truncate, isUrl, normalizeQuery, trackTitle, trackIdentifier } = await import(
-  "../src/utils.js"
-);
+const utils = await import("../src/utils.js");
+const { ms, parseSeconds, truncate, isUrl, normalizeQuery, trackTitle, trackIdentifier } = utils;
 const { renderLavalinkConfig } = await import("../src/lavalink/config-writer.js");
 const { config } = await import("../src/config.js");
 const { MusicService } = await import("../src/music/service.js");
@@ -149,17 +148,29 @@ test("deteksi error YouTube cocok dengan pesan asli Lavalink", () => {
   assert.equal(service.isYoutubeBlocked(""), false);
 });
 
-test("circuit breaker YouTube aktif setelah 3 kegagalan", () => {
+test("circuit breaker YouTube aktif setelah 2 kegagalan berurutan", () => {
   service.youtubeDegradedUntil = 0;
   service.youtubeFailureStreak = 0;
   service.lastYoutubeFailureAt = 0;
 
   service.noteYoutubeFailure({ guildId: "1" }, "All clients failed");
-  service.noteYoutubeFailure({ guildId: "1" }, "All clients failed");
   assert.equal(service.isYoutubeDegraded(), false);
 
   service.noteYoutubeFailure({ guildId: "1" }, "All clients failed");
   assert.equal(service.isYoutubeDegraded(), true);
+});
+
+test("circuit breaker YouTube reset kalau kegagalan berjauhan", () => {
+  service.youtubeDegradedUntil = 0;
+  service.youtubeFailureStreak = 0;
+  service.lastYoutubeFailureAt = 0;
+
+  service.noteYoutubeFailure({ guildId: "1" }, "All clients failed");
+  // Kegagalan berikutnya 5 menit kemudian: bukan blokir massal.
+  service.lastYoutubeFailureAt = Date.now() - 300_000;
+  service.noteYoutubeFailure({ guildId: "1" }, "All clients failed");
+
+  assert.equal(service.isYoutubeDegraded(), false);
 });
 
 test("isSameSong() tidak salah menganggap lagu berbeda", () => {
@@ -182,4 +193,43 @@ test("nodeHasSource() menghormati sourceManagers", () => {
   assert.equal(service.nodeHasSource(node, "scsearch"), true);
   assert.equal(service.nodeHasSource(node, "spsearch"), false);
   assert.equal(service.nodeHasSource({ info: { sourceManagers: [] } }, "spsearch"), true);
+});
+
+/* ------------------------------------------------------------------ */
+/* supervisor: log hygiene + port helpers                              */
+/* ------------------------------------------------------------------ */
+
+test("oneLine() meratakan stack trace jadi satu baris", () => {
+  const { oneLine } = utils;
+  const raw = "Client [ANDROID_VR] failed: This video requires login.\n\tat dev.lavalink.youtube.Client\n\tat java.base/Foo";
+  const out = oneLine(raw, 200);
+
+  assert.equal(out.includes("\n"), false);
+  assert.equal(out.includes("\t"), false);
+  assert.match(out, /^Client \[ANDROID_VR\] failed: This video requires login\. at dev\.lavalink\.youtube\.Client/);
+  assert.equal(oneLine("  banyak    spasi  "), "banyak spasi");
+  assert.equal(oneLine(""), "");
+});
+
+test("isPortOpen() dan waitForPortFree()", async () => {
+  const net = await import("node:net");
+  const { isPortOpen, waitForPortFree } = await import("../src/lavalink/supervisor.js");
+
+  const server = net.createServer();
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+
+  assert.equal(await isPortOpen(port), true);
+  assert.equal(await waitForPortFree(port, 1200), false);
+
+  await new Promise((resolve) => server.close(resolve));
+
+  assert.equal(await waitForPortFree(port, 5000), true);
+  assert.equal(await isPortOpen(port), false);
+});
+
+test("findLavalinkPidsOnPort() tidak pernah mengembalikan proses non-Lavalink", async () => {
+  const { findLavalinkPidsOnPort } = await import("../src/lavalink/supervisor.js");
+  const pids = findLavalinkPidsOnPort(1); // port 1 tidak pernah dipakai Lavalink
+  assert.deepEqual(pids, []);
 });
