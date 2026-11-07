@@ -134,3 +134,32 @@ export async function retry(fn, { attempts = 3, baseDelay = 500, maxDelay = 8000
   }
   throw lastError;
 }
+
+/** Errors that are worth retrying: DNS hiccup, socket reset, gateway 5xx. */
+const TRANSIENT_NET =
+  /EAI_AGAIN|ENOTFOUND|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|socket hang up|fetch failed|network error|aborted|timeout|(^|\s)50[234](\s|$)/i;
+
+export const isTransientNetworkError = (error) =>
+  TRANSIENT_NET.test(String(error?.message || error || ""));
+
+/**
+ * Runs `fn`, retrying a few times on transient network failures.
+ *
+ * A container DNS hiccup (`getaddrinfo EAI_AGAIN discord.com`) used to abort a
+ * whole command just because the acknowledgement message could not be sent.
+ */
+export async function retryNet(fn, attempts = 3, delayMs = 800) {
+  let lastError;
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (!isTransientNetworkError(error) || attempt === attempts) throw error;
+      await new Promise((resolve) => setTimeout(resolve, delayMs * attempt));
+    }
+  }
+
+  throw lastError;
+}

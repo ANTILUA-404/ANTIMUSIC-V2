@@ -155,7 +155,21 @@ export class MusicService {
   }
 
   raw(payload) {
-    this.lavalink.sendRawData(payload);
+    // sendRawData() is async. Leaving the promise unhandled turned a 20s
+    // Lavalink timeout into "Unhandled rejection ... updatePlayer" with a full
+    // stack trace in the panel. Forward, retry once, never crash.
+    const forward = () => Promise.resolve(this.lavalink.sendRawData(payload));
+
+    forward().catch(async (error) => {
+      const message = oneLine(error?.message, 160);
+      log.debug({ error: message }, "Gagal meneruskan payload voice ke Lavalink, mencoba sekali lagi");
+      this.markNodeDegraded("Lavalink-Primary", 30_000);
+
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await forward().catch((retryError) => {
+        log.debug({ error: oneLine(retryError?.message, 160) }, "Payload voice tetap gagal (diabaikan)");
+      });
+    });
   }
 
   getPlayer(guildId) {
@@ -432,6 +446,10 @@ export class MusicService {
       const message = error?.message || String(error);
       this.markNodeDegraded(node.id, 90_000);
 
+      // While our own supervisor is still booting/restarting Lavalink,
+      // ECONNREFUSED is expected and not worth a warning.
+      if (["starting", "restarting", "idle"].includes(lavalinkSupervisor.state)) return;
+
       // Keep this quiet: a dead node used to flood the console every 5 seconds.
       const key = `err:${node.id}`;
       const last = this.nodeCooldowns.get(key) || 0;
@@ -443,6 +461,8 @@ export class MusicService {
 
     manager.nodeManager.on("disconnect", (node, reason) => {
       this.markNodeDegraded(node.id, 90_000);
+
+      if (["starting", "restarting", "idle"].includes(lavalinkSupervisor.state)) return;
 
       const key = `down:${node.id}`;
       const last = this.nodeCooldowns.get(key) || 0;

@@ -15,7 +15,7 @@ import { lavalinkSupervisor } from "./lavalink/supervisor.js";
 import { log } from "./logger.js";
 import { MusicService } from "./music/service.js";
 import { flushState, state } from "./state.js";
-import { oneLine } from "./utils.js";
+import { isTransientNetworkError, oneLine, retryNet } from "./utils.js";
 import { denialPayload, whitelist } from "./whitelist.js";
 
 /* -------------------------------------------------------------------- */
@@ -63,6 +63,19 @@ function formatCommandError(error) {
   return `❌ ${message}`;
 }
 
+/**
+ * Sends something to Discord, retrying transient failures (DNS hiccup,
+ * socket reset). A failed acknowledgement must never abort the command.
+ */
+async function sendSafely(fn) {
+  try {
+    return await retryNet(fn, 3, 800);
+  } catch (error) {
+    log.debug({ error: oneLine(error?.message, 160) }, "Gagal mengirim pesan ke Discord (diabaikan)");
+    return null;
+  }
+}
+
 function logDenied(guild, user) {
   log.warn(
     { guildId: guild?.id, guild: guild?.name, user: user?.tag || user?.username },
@@ -77,11 +90,12 @@ const interactionContext = (interaction) => ({
   user: interaction.user,
   reply: async (payload) => {
     const data = typeof payload === "string" ? { content: payload } : payload;
-    if (interaction.deferred || interaction.replied) return interaction.editReply(data);
-    return interaction.reply(data);
+    return sendSafely(() =>
+      interaction.deferred || interaction.replied ? interaction.editReply(data) : interaction.reply(data),
+    );
   },
   edit: (payload) =>
-    interaction.editReply(typeof payload === "string" ? { content: payload } : payload),
+    sendSafely(() => interaction.editReply(typeof payload === "string" ? { content: payload } : payload)),
 });
 
 /* -------------------------------------------------------------------- */
@@ -231,7 +245,8 @@ client.on("messageCreate", async (message) => {
     channelId: message.channel.id,
     member: message.member,
     user: message.author,
-    reply: (payload) => message.reply(typeof payload === "string" ? { content: payload } : payload),
+    reply: (payload) =>
+      sendSafely(() => message.reply(typeof payload === "string" ? { content: payload } : payload)),
   };
 
   try {
@@ -295,7 +310,7 @@ client.on("messageCreate", async (message) => {
     }
   } catch (error) {
     log.error({ error: oneLine(error.message, 200), command }, "Prefix command error");
-    await message.reply(formatCommandError(error)).catch(() => {});
+    await sendSafely(() => message.reply(formatCommandError(error)));
   }
 });
 
@@ -534,7 +549,7 @@ process.on("exit", () => {
 });
 
 process.on("unhandledRejection", (reason) => {
-  const message = reason?.message || String(reason);
+  const message = oneLine(reason?.message || reason, 220);
 
   // lavalink-client throws inside fetchInfo() when a node returns HTML
   // (proxy error page, Cloudflare challenge, ...) or when the socket dies
@@ -543,6 +558,13 @@ process.on("unhandledRejection", (reason) => {
     /not valid JSON|Unexpected token|proxy error|does not provide any \/v4\/info|ON-OPEN-FETCH/i.test(message)
   ) {
     log.debug({ error: message }, "Node mengembalikan respons tidak valid (diabaikan)");
+    return;
+  }
+
+  // Transient network problems (container DNS hiccup, Lavalink busy): one clean
+  // line, no stack trace, the bot keeps running.
+  if (isTransientNetworkError(message)) {
+    log.warn({ error: message }, "Gangguan jaringan sementara (diabaikan)");
     return;
   }
 

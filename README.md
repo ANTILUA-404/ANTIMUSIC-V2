@@ -101,8 +101,8 @@ Lavalink ke VPS lain, baca **[docs/HOSTING.md](docs/HOSTING.md)**.
 npm test
 ```
 
-21 test inti (parser link, deteksi error YouTube, circuit breaker, generator config,
-helper port supervisor)
+24 test inti (parser link, deteksi error YouTube, circuit breaker, generator config,
+helper port supervisor, retry jaringan)
 jalan tanpa perlu token, Discord, atau Lavalink. Cocok juga untuk CI.
 
 ---
@@ -269,7 +269,7 @@ src/
     service.js               player, queue, command, failover
     radio.js                 engine mode 24/7
     links.js                 resolver Spotify / Apple Music / Deezer
-test/core.test.js            21 unit test (npm test)
+test/core.test.js            24 unit test (npm test)
 scripts/doctor.js            diagnosa mandiri
 docs/HOSTING.md              Lavalink: mana yang bisa, mana yang tidak
 data/state.json              preferensi server (dibuat otomatis)

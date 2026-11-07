@@ -233,3 +233,48 @@ test("findLavalinkPidsOnPort() tidak pernah mengembalikan proses non-Lavalink", 
   const pids = findLavalinkPidsOnPort(1); // port 1 tidak pernah dipakai Lavalink
   assert.deepEqual(pids, []);
 });
+
+/* ------------------------------------------------------------------ */
+/* jaringan: retry & klasifikasi error                                 */
+/* ------------------------------------------------------------------ */
+
+test("isTransientNetworkError() mengenali gangguan sementara", () => {
+  const { isTransientNetworkError } = utils;
+
+  assert.equal(isTransientNetworkError(new Error("getaddrinfo EAI_AGAIN discord.com")), true);
+  assert.equal(isTransientNetworkError(new Error("connect ECONNRESET 104.18.2.1:443")), true);
+  assert.equal(isTransientNetworkError(new Error("The operation was aborted due to timeout")), true);
+  assert.equal(isTransientNetworkError(new Error("socket hang up")), true);
+  assert.equal(isTransientNetworkError(new Error("Unknown interaction")), false);
+  assert.equal(isTransientNetworkError(new Error("Missing Permissions")), false);
+});
+
+test("retryNet() mengulang error sementara lalu berhasil", async () => {
+  const { retryNet } = utils;
+  let calls = 0;
+
+  const value = await retryNet(async () => {
+    calls += 1;
+    if (calls < 3) throw new Error("getaddrinfo EAI_AGAIN discord.com");
+    return "ok";
+  }, 3, 5);
+
+  assert.equal(value, "ok");
+  assert.equal(calls, 3);
+});
+
+test("retryNet() tidak mengulang error permanen", async () => {
+  const { retryNet } = utils;
+  let calls = 0;
+
+  await assert.rejects(
+    () =>
+      retryNet(async () => {
+        calls += 1;
+        throw new Error("Missing Permissions");
+      }, 3, 5),
+    /Missing Permissions/,
+  );
+
+  assert.equal(calls, 1);
+});
