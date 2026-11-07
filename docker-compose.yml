@@ -1,0 +1,29 @@
+services:
+  antimusic:
+    build: .
+    container_name: antimusic
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Bot menyalakan Lavalink.jar sendiri di dalam container ini.
+      LAVALINK_EMBEDDED: "true"
+      LAVALINK_HOST: "127.0.0.1"
+      LAVALINK_PORT: "2333"
+      # Di Docker, SERVER_PORT tidak disuntikkan, jadi pakai port tetap.
+      HEALTH_PORT: "${HEALTH_PORT:-3000}"
+    ports:
+      - "${HEALTH_PORT:-3000}:${HEALTH_PORT:-3000}"
+    volumes:
+      - ./data:/app/data
+      - ./lavalink:/app/lavalink
+    mem_limit: 1536m
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "fetch('http://127.0.0.1:'+(process.env.HEALTH_PORT||3000)+'/health')
+          .then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s

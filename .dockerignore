@@ -1,0 +1,13 @@
+node_modules
+data
+lavalink/Lavalink.jar
+lavalink/jre
+lavalink/plugins
+lavalink/logs
+lavalink/*.log
+lavalink/application.yml
+.env
+.env.*
+*.log
+.git
+.github

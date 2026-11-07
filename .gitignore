@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Environment secrets (JANGAN di-commit)
+.env
+.env.local
+.env.*.local
+
+# Persistent local data
+data/*.json
+data/*.json.*
+!data/.gitkeep
+!data/whitelist.example.json
+
+# Lavalink binaries & runtime (bisa 150MB+, jangan masuk repo)
+lavalink/Lavalink.jar
+lavalink/jre/
+lavalink/plugins/
+lavalink/logs/
+lavalink/application.yml
+lavalink/application.yml.backup-*
+lavalink/*.log
+lavalink/*.tar.gz
+
+# Logs & debug
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# System files
+.DS_Store
+Thumbs.db

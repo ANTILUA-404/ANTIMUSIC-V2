@@ -1,0 +1,6 @@
+{
+  "_catatan": "Daftar ID server Discord yang boleh memakai bot. Bisa diedit dari file manager Pterodactyl; perubahan terbaca otomatis dalam 30 detik tanpa restart.",
+  "guilds": [
+    "123456789012345678"
+  ]
+}
