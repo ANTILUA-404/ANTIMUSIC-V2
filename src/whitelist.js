@@ -1,24 +1,27 @@
-import fs from "node:fs";
-import path from "node:path";
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from "discord.js";
-import { config } from "./config.js";
-import { log } from "./logger.js";
+import fs from 'node:fs';
+import path from 'node:path';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags } from 'discord.js';
+import { config } from './config.js';
+import { createLogger } from './utils/logger.js';
 
-const FILE = path.join(config.paths.dataDir, "whitelist.json");
+const log = createLogger('whitelist');
+
+const FILE = path.join(config.paths.dataDir, 'whitelist.json');
 const FILE_TEMPLATE = {
-  _catatan: "Tambahkan ID server Discord yang boleh memakai bot ini. Perubahan otomatis terbaca dalam 30 detik tanpa restart.",
+  _catatan:
+    'Tambahkan ID server Discord yang boleh memakai bot ini. Perubahan otomatis terbaca dalam 30 detik tanpa restart.',
   guilds: [],
 };
 
 function parseIds(raw) {
-  return String(raw ?? "")
+  return String(raw ?? '')
     .split(/[,\s]+/)
     .map((value) => value.trim())
     .filter((value) => /^\d{15,25}$/.test(value));
 }
 
 /**
- * Server licence / whitelist.
+ * Server licence / whitelist (dipertahankan dari ANTIMUSIC v2).
  *
  * Sumber ID (digabung):
  *   1. WHITELIST_GUILD_IDS di .env  (dipisah koma / spasi)
@@ -31,10 +34,10 @@ class Whitelist {
   constructor() {
     this.ids = new Set();
     this.openMode = false;
-    this.fileStamp = "";
+    this.fileStamp = '';
     this.notifiedAt = new Map();
-    this.reload();
     this.ensureFile();
+    this.reload();
 
     const timer = setInterval(() => this.refreshIfChanged(), 30_000);
     timer.unref?.();
@@ -44,10 +47,10 @@ class Whitelist {
     try {
       if (fs.existsSync(FILE)) return;
       fs.mkdirSync(path.dirname(FILE), { recursive: true });
-      fs.writeFileSync(FILE, JSON.stringify(FILE_TEMPLATE, null, 2), "utf8");
+      fs.writeFileSync(FILE, JSON.stringify(FILE_TEMPLATE, null, 2), 'utf8');
       this.fileStamp = this.stamp();
     } catch (error) {
-      log.warn({ error: error.message }, "Tidak bisa membuat data/whitelist.json");
+      log.warn('Tidak bisa membuat data/whitelist.json:', error.message);
     }
   }
 
@@ -56,14 +59,14 @@ class Whitelist {
       const stat = fs.statSync(FILE);
       return `${stat.mtimeMs}:${stat.size}`;
     } catch {
-      return "missing";
+      return 'missing';
     }
   }
 
   readFileIds() {
     try {
       if (!fs.existsSync(FILE)) return [];
-      const raw = fs.readFileSync(FILE, "utf8").trim();
+      const raw = fs.readFileSync(FILE, 'utf8').trim();
       if (!raw) return [];
 
       const parsed = JSON.parse(raw);
@@ -71,14 +74,14 @@ class Whitelist {
       if (parsed && Array.isArray(parsed.guilds)) return parsed.guilds.map(String);
       return [];
     } catch (error) {
-      log.warn({ error: error.message }, "data/whitelist.json tidak valid, diabaikan");
+      log.warn('data/whitelist.json tidak valid, diabaikan:', error.message);
       return [];
     }
   }
 
   reload() {
-    const fromEnv = parseIds(config.whitelist.guildIds.join(" "));
-    const fromFile = parseIds(this.readFileIds().join(" "));
+    const fromEnv = parseIds(config.whitelist.guildIds.join(' '));
+    const fromFile = parseIds(this.readFileIds().join(' '));
 
     this.ids = new Set([...fromEnv, ...fromFile]);
     this.fileStamp = this.stamp();
@@ -88,14 +91,14 @@ class Whitelist {
     this.openMode = config.whitelist.enabled && this.ids.size === 0;
 
     if (!config.whitelist.enabled) {
-      log.warn("Whitelist server DIMATIKAN (WHITELIST_ENABLED=false) - semua server bisa memakai bot");
+      log.warn('Whitelist server DIMATIKAN (WHITELIST_ENABLED=false) - semua server bisa memakai bot');
     } else if (this.openMode) {
       log.warn(
-        "Whitelist aktif tapi daftarnya kosong - semua server diizinkan sementara. " +
-          "Isi WHITELIST_GUILD_IDS di .env atau data/whitelist.json.",
+        'Whitelist aktif tapi daftarnya kosong - semua server diizinkan sementara. ' +
+          'Isi WHITELIST_GUILD_IDS di .env atau data/whitelist.json.',
       );
     } else {
-      log.info({ servers: this.ids.size }, "Whitelist server dimuat");
+      log.info(`Whitelist server dimuat: ${this.ids.size} server`);
     }
   }
 
@@ -103,7 +106,7 @@ class Whitelist {
     if (!config.whitelist.enabled) return;
     const stamp = this.stamp();
     if (stamp === this.fileStamp) return;
-    log.info("data/whitelist.json berubah, memuat ulang daftar lisensi");
+    log.info('data/whitelist.json berubah, memuat ulang daftar lisensi');
     this.reload();
   }
 
@@ -136,24 +139,24 @@ export const whitelist = new Whitelist();
 /** Panel yang muncul di server yang belum berlisensi. */
 export function buildDenialPanel(guild) {
   const owner = config.whitelist.ownerUsername;
-  const serverName = guild?.name ? `**${guild.name}**` : "Server ini";
+  const serverName = guild?.name ? `**${guild.name}**` : 'Server ini';
 
   return new EmbedBuilder()
     .setColor(0xf59e0b)
-    .setTitle("🔒 Server Belum Berlisensi")
+    .setTitle('🔒 Server Belum Berlisensi')
     .setDescription(
       `${serverName} belum terdaftar di whitelist **ANTIMUSIC**.\n\n` +
-        "Untuk membeli izin pemakaian bot, silakan hubungi owner:\n" +
+        'Untuk membeli izin pemakaian bot, silakan hubungi owner:\n' +
         `> 👑 **${owner}**\n\n` +
-        "Setelah pembayaran dikonfirmasi, owner akan mendaftarkan ID server ini " +
-        "dan bot langsung aktif tanpa perlu restart.",
+        'Setelah pembayaran dikonfirmasi, owner akan mendaftarkan ID server ini ' +
+        'dan bot langsung aktif tanpa perlu restart.',
     )
     .addFields(
-      { name: "Status Lisensi", value: "❌ Tidak aktif", inline: true },
-      { name: "Server ID", value: `\`${guild?.id ?? "-"}\``, inline: true },
-      { name: "Owner Bot", value: `\`${owner}\``, inline: true },
+      { name: 'Status Lisensi', value: '❌ Tidak aktif', inline: true },
+      { name: 'Server ID', value: `\`${guild?.id ?? '-'}\``, inline: true },
+      { name: 'Owner Bot', value: `\`${owner}\``, inline: true },
     )
-    .setFooter({ text: "ANTIMUSIC • Sistem Lisensi Server" })
+    .setFooter({ text: 'ANTIMUSIC • Sistem Lisensi Server' })
     .setTimestamp();
 }
 
@@ -165,8 +168,8 @@ export function buildDenialComponents() {
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setLabel("Hubungi Owner")
-        .setEmoji("💬")
+        .setLabel('Hubungi Owner')
+        .setEmoji('💬')
         .setStyle(ButtonStyle.Link)
         .setURL(`https://discord.com/users/${ownerId}`),
     ),
@@ -174,13 +177,11 @@ export function buildDenialComponents() {
 }
 
 export function denialPayload(guild, { ephemeral = false } = {}) {
-  const payload = {
-    embeds: [buildDenialPanel(guild)],
-  };
+  const payload = { embeds: [buildDenialPanel(guild)] };
 
   const components = buildDenialComponents();
   if (components.length) payload.components = components;
-  if (ephemeral) payload.flags = 64; // MessageFlags.Ephemeral
+  if (ephemeral) payload.flags = MessageFlags.Ephemeral;
 
   return payload;
 }

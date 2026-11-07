@@ -1,26 +1,20 @@
 #!/usr/bin/env bash
 #
-# ANTIMUSIC launcher for Pterodactyl / VPS.
+# ANTIMUSIC launcher untuk Pterodactyl / VPS.
 #   ./start.sh
 #
-set -euo pipefail
-
+set -e
 cd "$(dirname "$0")"
 
-if ! command -v node >/dev/null 2>&1; then
-  echo "[ANTIMUSIC] Node.js tidak ditemukan. Gunakan image Node.js 20/22." >&2
-  exit 1
+if [ ! -d node_modules ]; then
+  echo "[antimusic] node_modules belum ada, menjalankan npm install..."
+  npm install
 fi
 
-NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
-if [ "$NODE_MAJOR" -lt 20 ]; then
-  echo "[ANTIMUSIC] Node.js v$(node -v) terlalu lama, butuh >= 20." >&2
+if [ ! -f .env ]; then
+  echo "[antimusic] .env belum ada."
+  echo "            copy .env.example menjadi .env lalu isi DISCORD_TOKEN & CLIENT_ID."
   exit 1
-fi
-
-if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then
-  echo "[ANTIMUSIC] Memasang dependency..."
-  npm install --omit=dev --no-audit --no-fund
 fi
 
 exec node index.js

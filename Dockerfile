@@ -1,31 +1,27 @@
-# ANTIMUSIC - single container (bot + embedded Lavalink)
+# ANTIMUSIC v3 - single container (Discord.js + yt-dlp + FFmpeg)
+# Tidak ada Java/Lavalink di image ini.
 FROM node:22-bookworm-slim
 
-# Java 17 is required by Lavalink. curl/tar for the jar & JRE bootstrap.
+# ca-certificates: unduhan HTTPS (yt-dlp, Discord API)
+# python3: hanya dipakai kalau kamu memasang yt-dlp versi pip; binary standalone tidak butuh
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        openjdk-17-jre-headless \
-        curl \
-        ca-certificates \
-        tini \
+    && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-ENV NODE_ENV=production
-ENV LAVALINK_EMBEDDED=true
-
-COPY package.json package-lock.json* ./
-RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
+COPY package*.json ./
+# @discordjs/opus opsional: kalau build native gagal, opusscript dipakai otomatis.
+RUN npm install --omit=dev --no-audit --no-fund
 
 COPY . .
 
-RUN mkdir -p /app/data /app/lavalink/plugins
+# Bake yt-dlp ke dalam image supaya cold start tidak perlu unduh lagi.
+RUN node scripts/install-ytdlp.js
+
+ENV NODE_ENV=production
+ENV LOG_LEVEL=info
 
 EXPOSE 3000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
-    CMD node -e "fetch('http://127.0.0.1:'+(process.env.HEALTH_PORT||3000)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-
-ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "index.js"]

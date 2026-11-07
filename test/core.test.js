@@ -1,280 +1,102 @@
-/**
- * Test inti ANTIMUSIC — tidak butuh jaringan, tidak butuh Discord/Lavalink.
- * Jalankan: npm test
- */
-process.env.DISCORD_TOKEN = "AAAAAAAAAAAAAAAAAAAAAAAA.BBBBB.CCCCCCCCCCCCCCCCCCCCCCCC";
-process.env.CLIENT_ID = "123456789012345678";
-process.env.LAVALINK_EMBEDDED = "false";
-process.env.LOG_LEVEL = "error";
+import test from 'node:test';
+import assert from 'node:assert/strict';
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import {
+  escapeMarkdown,
+  formatDuration,
+  parseDuration,
+  playlistDuration,
+  progressBar,
+  truncate,
+} from '../src/utils/format.js';
+import { parseTimeInput } from '../src/utils/guards.js';
+import { FILTERS } from '../src/structures/GuildPlayer.js';
+import { stationToTrack } from '../src/structures/RadioStore.js';
+import { Track } from '../src/structures/Track.js';
 
-const { parseMusicLink, SOURCE_MANAGER, SERVICE_SEARCH_PREFIX } = await import("../src/music/links.js");
-const utils = await import("../src/utils.js");
-const { ms, parseSeconds, truncate, isUrl, normalizeQuery, trackTitle, trackIdentifier } = utils;
-const { renderLavalinkConfig } = await import("../src/lavalink/config-writer.js");
-const { config } = await import("../src/config.js");
-const { MusicService } = await import("../src/music/service.js");
-
-/* ------------------------------------------------------------------ */
-/* utils                                                               */
-/* ------------------------------------------------------------------ */
-
-test("ms() memformat durasi", () => {
-  assert.equal(ms(0), "0:00");
-  assert.equal(ms(65_000), "1:05");
-  assert.equal(ms(3_725_000), "1:02:05");
-  assert.equal(ms(-1), "0:00");
-  assert.equal(ms(NaN), "0:00");
+test('formatDuration', () => {
+  assert.equal(formatDuration(0), '0:00');
+  assert.equal(formatDuration(65), '1:05');
+  assert.equal(formatDuration(3725), '1:02:05');
+  assert.equal(formatDuration(Number.NaN), 'LIVE');
+  assert.equal(formatDuration(-5), 'LIVE');
 });
 
-test("parseSeconds() menerima detik dan mm:ss", () => {
-  assert.equal(parseSeconds("90"), 90);
-  assert.equal(parseSeconds("1:30"), 90);
-  assert.equal(parseSeconds("1:02:03"), 3723);
-  assert.equal(parseSeconds("abc"), null);
-  assert.equal(parseSeconds("-5"), null);
-  assert.equal(parseSeconds("1:xx"), null);
+test('parseDuration', () => {
+  assert.equal(parseDuration('90'), 90);
+  assert.equal(parseDuration('1:30'), 90);
+  assert.equal(parseDuration('1:02:05'), 3725);
+  assert.equal(parseDuration(''), null);
+  assert.equal(parseDuration('abc'), null);
 });
 
-test("truncate() memotong dengan elipsis", () => {
-  assert.equal(truncate("abcdef", 10), "abcdef");
-  assert.equal(truncate("abcdefghij", 5), "abcd…");
-  assert.equal(truncate(null, 5), "");
+test('progressBar', () => {
+  assert.equal(progressBar(0, 0), '🔴 LIVE');
+  assert.equal(progressBar(100, 200).includes('🔘'), true);
+  assert.equal(progressBar(0, 200).startsWith('🔘'), true);
+  assert.equal(progressBar(200, 200).endsWith('🔘'), true);
 });
 
-test("isUrl() dan normalizeQuery()", () => {
-  assert.equal(isUrl("https://youtu.be/abc"), true);
-  assert.equal(isUrl("lofi hip hop"), false);
-  assert.equal(normalizeQuery("youtube.com/watch?v=abc"), "https://youtube.com/watch?v=abc");
-  assert.equal(normalizeQuery("  lofi  "), "lofi");
+test('truncate & escapeMarkdown', () => {
+  assert.equal(truncate('hello world', 5), 'hell…');
+  assert.equal(truncate('  spaced   out  '), 'spaced out');
+  assert.equal(escapeMarkdown('*NSYNC_x'), '\\*NSYNC\\_x');
 });
 
-test("helper track aman untuk data kosong", () => {
-  assert.equal(trackTitle(null), "Unknown track");
-  assert.equal(trackIdentifier({ info: { identifier: "abc" } }), "abc");
+test('playlistDuration sums only finite durations', () => {
+  assert.equal(playlistDuration([{ duration: 10 }, { duration: 5 }, { duration: Number.NaN }]), 15);
 });
 
-/* ------------------------------------------------------------------ */
-/* link musik                                                          */
-/* ------------------------------------------------------------------ */
-
-test("parseMusicLink() mengenali Spotify", () => {
-  assert.deepEqual(parseMusicLink("https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT?si=x"), {
-    service: "spotify",
-    kind: "track",
-    id: "4cOdK2wGLETKBW3PvgPWqT",
-    url: "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT?si=x",
-  });
-  assert.equal(parseMusicLink("https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M").kind, "playlist");
-  assert.equal(parseMusicLink("spotify:track:4cOdK2wGLETKBW3PvgPWqT").id, "4cOdK2wGLETKBW3PvgPWqT");
+test('parseTimeInput handles mm:ss', () => {
+  assert.equal(parseTimeInput('1:30'), 90);
+  assert.equal(parseTimeInput('90'), 90);
+  assert.equal(parseTimeInput('1:02:03'), 3723);
+  assert.equal(parseTimeInput('x'), null);
+  assert.equal(parseTimeInput('1:2:3:4'), null);
 });
 
-test("parseMusicLink() mengenali Apple Music", () => {
-  const albumLink = parseMusicLink("https://music.apple.com/us/album/x/1559885420?i=1559885421");
-  assert.equal(albumLink.service, "applemusic");
-  assert.equal(albumLink.kind, "track");
-  assert.equal(albumLink.id, "1559885421");
-
-  const songLink = parseMusicLink("https://music.apple.com/us/song/x/1559885421");
-  assert.equal(songLink.id, "1559885421");
-});
-
-test("parseMusicLink() mengenali Deezer", () => {
-  const link = parseMusicLink("https://www.deezer.com/track/3135556");
-  assert.equal(link.service, "deezer");
-  assert.equal(link.id, "3135556");
-});
-
-test("parseMusicLink() tidak salah mengenali link lain", () => {
-  assert.equal(parseMusicLink("https://www.youtube.com/watch?v=dQw4w9WgXcQ"), null);
-  assert.equal(parseMusicLink("lofi hip hop"), null);
-  assert.equal(parseMusicLink(""), null);
-});
-
-test("peta sumber konsisten", () => {
-  assert.equal(SOURCE_MANAGER.spsearch, "spotify");
-  assert.equal(SOURCE_MANAGER.amsearch, "applemusic");
-  assert.equal(SOURCE_MANAGER.dzsearch, "deezer");
-  assert.equal(SERVICE_SEARCH_PREFIX.spotify, "spsearch");
-});
-
-/* ------------------------------------------------------------------ */
-/* config lavalink                                                     */
-/* ------------------------------------------------------------------ */
-
-test("application.yml yang di-generate berisi konfigurasi wajib", () => {
-  const yaml = renderLavalinkConfig();
-
-  assert.match(yaml, /server:\n {2}port: 2333/);
-  assert.match(yaml, /password: "antimusic-super-secret"/);
-  assert.match(yaml, /youtube: false/);
-  assert.match(yaml, /youtube-plugin:1\.18\.2/);
-  assert.match(yaml, /TVHTML5_SIMPLY/);
-  // Tanpa kredensial, plugin LavaSrc tidak boleh ikut (biar tidak ada crash).
-  assert.equal(yaml.includes("lavasrc"), false);
-});
-
-test("port Lavalink dipaksa lewat argumen JVM", () => {
-  // Nilai ini yang menyelamatkan bot dari SERVER_PORT milik Pterodactyl.
-  assert.equal(config.lavalink.port, 2333);
-  assert.equal(config.lavalink.embedded, false);
-});
-
-/* ------------------------------------------------------------------ */
-/* logika musik                                                        */
-/* ------------------------------------------------------------------ */
-
-const service = new MusicService({
-  user: { id: "1", username: "ANTIMUSIC" },
-  guilds: { cache: new Map() },
-  channels: { cache: new Map() },
-  ws: { shards: { first: () => null } },
-});
-
-test("deteksi error YouTube cocok dengan pesan asli Lavalink", () => {
-  const blocked = [
-    "(yts.version: 1.18.2) All clients failed to load the item.",
-    "This video requires login.",
-    "No supported audio streams available, available types:",
-    "Must find sig function from script: /s/player/a5c2aafe/base.js",
-    "The page needs to be reloaded.",
-    "This video is unavailable",
-  ];
-  for (const message of blocked) assert.equal(service.isYoutubeBlocked(message), true, message);
-
-  assert.equal(service.isYoutubeBlocked("Track ended normally"), false);
-  assert.equal(service.isYoutubeBlocked(""), false);
-});
-
-test("circuit breaker YouTube aktif setelah 2 kegagalan berurutan", () => {
-  service.youtubeDegradedUntil = 0;
-  service.youtubeFailureStreak = 0;
-  service.lastYoutubeFailureAt = 0;
-
-  service.noteYoutubeFailure({ guildId: "1" }, "All clients failed");
-  assert.equal(service.isYoutubeDegraded(), false);
-
-  service.noteYoutubeFailure({ guildId: "1" }, "All clients failed");
-  assert.equal(service.isYoutubeDegraded(), true);
-});
-
-test("circuit breaker YouTube reset kalau kegagalan berjauhan", () => {
-  service.youtubeDegradedUntil = 0;
-  service.youtubeFailureStreak = 0;
-  service.lastYoutubeFailureAt = 0;
-
-  service.noteYoutubeFailure({ guildId: "1" }, "All clients failed");
-  // Kegagalan berikutnya 5 menit kemudian: bukan blokir massal.
-  service.lastYoutubeFailureAt = Date.now() - 300_000;
-  service.noteYoutubeFailure({ guildId: "1" }, "All clients failed");
-
-  assert.equal(service.isYoutubeDegraded(), false);
-});
-
-test("isSameSong() tidak salah menganggap lagu berbeda", () => {
-  assert.equal(service.isSameSong("Dewi (Official Audio)", "Dewi"), true);
-  assert.equal(service.isSameSong("Dewi", "Pupus"), false);
-});
-
-test("extractYouTubeVideoId()", () => {
-  assert.equal(service.extractYouTubeVideoId({ info: { identifier: "dQw4w9WgXcQ", sourceName: "youtube" } }), "dQw4w9WgXcQ");
-  assert.equal(
-    service.extractYouTubeVideoId({ info: { identifier: "x", uri: "https://youtu.be/dQw4w9WgXcQ" } }),
-    "dQw4w9WgXcQ",
+test('Track marks zero-duration items as live streams', () => {
+  const live = Track.fromYtdlp(
+    { title: 'radio', url: 'https://youtu.be/x', duration: 0, author: 'a', source: 'youtube', isLive: true },
+    'u1',
   );
-  assert.equal(service.extractYouTubeVideoId({ info: { identifier: "sc123", sourceName: "soundcloud" } }), null);
-});
+  assert.equal(live.isStream, true);
+  assert.equal(live.stream.kind, 'ytdlp');
 
-test("nodeHasSource() menghormati sourceManagers", () => {
-  const node = { info: { sourceManagers: ["youtube", "soundcloud"] } };
-  assert.equal(service.nodeHasSource(node, "ytsearch"), true);
-  assert.equal(service.nodeHasSource(node, "scsearch"), true);
-  assert.equal(service.nodeHasSource(node, "spsearch"), false);
-  assert.equal(service.nodeHasSource({ info: { sourceManagers: [] } }, "spsearch"), true);
-});
-
-/* ------------------------------------------------------------------ */
-/* supervisor: log hygiene + port helpers                              */
-/* ------------------------------------------------------------------ */
-
-test("oneLine() meratakan stack trace jadi satu baris", () => {
-  const { oneLine } = utils;
-  const raw = "Client [ANDROID_VR] failed: This video requires login.\n\tat dev.lavalink.youtube.Client\n\tat java.base/Foo";
-  const out = oneLine(raw, 200);
-
-  assert.equal(out.includes("\n"), false);
-  assert.equal(out.includes("\t"), false);
-  assert.match(out, /^Client \[ANDROID_VR\] failed: This video requires login\. at dev\.lavalink\.youtube\.Client/);
-  assert.equal(oneLine("  banyak    spasi  "), "banyak spasi");
-  assert.equal(oneLine(""), "");
-});
-
-test("isPortOpen() dan waitForPortFree()", async () => {
-  const net = await import("node:net");
-  const { isPortOpen, waitForPortFree } = await import("../src/lavalink/supervisor.js");
-
-  const server = net.createServer();
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const port = server.address().port;
-
-  assert.equal(await isPortOpen(port), true);
-  assert.equal(await waitForPortFree(port, 1200), false);
-
-  await new Promise((resolve) => server.close(resolve));
-
-  assert.equal(await waitForPortFree(port, 5000), true);
-  assert.equal(await isPortOpen(port), false);
-});
-
-test("findLavalinkPidsOnPort() tidak pernah mengembalikan proses non-Lavalink", async () => {
-  const { findLavalinkPidsOnPort } = await import("../src/lavalink/supervisor.js");
-  const pids = findLavalinkPidsOnPort(1); // port 1 tidak pernah dipakai Lavalink
-  assert.deepEqual(pids, []);
-});
-
-/* ------------------------------------------------------------------ */
-/* jaringan: retry & klasifikasi error                                 */
-/* ------------------------------------------------------------------ */
-
-test("isTransientNetworkError() mengenali gangguan sementara", () => {
-  const { isTransientNetworkError } = utils;
-
-  assert.equal(isTransientNetworkError(new Error("getaddrinfo EAI_AGAIN discord.com")), true);
-  assert.equal(isTransientNetworkError(new Error("connect ECONNRESET 104.18.2.1:443")), true);
-  assert.equal(isTransientNetworkError(new Error("The operation was aborted due to timeout")), true);
-  assert.equal(isTransientNetworkError(new Error("socket hang up")), true);
-  assert.equal(isTransientNetworkError(new Error("Unknown interaction")), false);
-  assert.equal(isTransientNetworkError(new Error("Missing Permissions")), false);
-});
-
-test("retryNet() mengulang error sementara lalu berhasil", async () => {
-  const { retryNet } = utils;
-  let calls = 0;
-
-  const value = await retryNet(async () => {
-    calls += 1;
-    if (calls < 3) throw new Error("getaddrinfo EAI_AGAIN discord.com");
-    return "ok";
-  }, 3, 5);
-
-  assert.equal(value, "ok");
-  assert.equal(calls, 3);
-});
-
-test("retryNet() tidak mengulang error permanen", async () => {
-  const { retryNet } = utils;
-  let calls = 0;
-
-  await assert.rejects(
-    () =>
-      retryNet(async () => {
-        calls += 1;
-        throw new Error("Missing Permissions");
-      }, 3, 5),
-    /Missing Permissions/,
+  const song = Track.fromYtdlp(
+    { title: 'song', url: 'https://youtu.be/y', duration: 200, author: 'a', source: 'youtube', isLive: false },
+    'u1',
   );
+  assert.equal(song.isStream, false);
+});
 
-  assert.equal(calls, 1);
+test('Track.fromDirectUrl uses ffmpeg-direct stream kind', () => {
+  const track = Track.fromDirectUrl('https://ice2.somafm.com/groovesalad-128-mp3', { title: 'Groove Salad' });
+  assert.equal(track.stream.kind, 'url');
+  assert.equal(track.isStream, true);
+});
+
+test('ensurePlayable is a no-op for already playable tracks', async () => {
+  const track = Track.fromDirectUrl('https://example.com/a.mp3');
+  const same = await track.ensurePlayable();
+  assert.equal(same, track);
+  assert.equal(track.stream.kind, 'url');
+});
+
+test('stationToTrack maps station kind to stream kind', () => {
+  const direct = stationToTrack({ id: 'a', name: 'A', url: 'https://x/y.mp3', kind: 'url' });
+  assert.equal(direct.stream.kind, 'url');
+  assert.equal(direct.source, 'radio');
+
+  const yt = stationToTrack({ id: 'b', name: 'B', url: 'https://youtube.com/watch?v=x', kind: 'ytdlp' });
+  assert.equal(yt.stream.kind, 'ytdlp');
+});
+
+test('all audio filters are non-empty strings except none', () => {
+  assert.equal(FILTERS.none, null);
+  for (const [name, filter] of Object.entries(FILTERS)) {
+    if (name === 'none') continue;
+    assert.equal(typeof filter, 'string', `${name} harus string`);
+    assert.ok(filter.length > 3, `${name} filter terlalu pendek`);
+  }
 });

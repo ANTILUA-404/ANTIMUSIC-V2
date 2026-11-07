@@ -1,22 +1,41 @@
 {
   "name": "antimusic",
-  "version": "2.3.3",
+  "version": "3.0.0",
   "private": true,
-  "description": "ANTIMUSIC - Discord music bot (Discord.js + Lavalink v4) with embedded Lavalink supervisor, 24/7 radio mode and server licence whitelist",
+  "description": "ANTIMUSIC v3 — Discord music bot (Discord.js 14 + yt-dlp + FFmpeg). Tanpa Lavalink/Java, 24/7 radio, whitelist lisensi, siap Pterodactyl.",
   "type": "module",
   "main": "index.js",
-  "scripts": {
-    "start": "node index.js",
-    "dev": "node --watch index.js",
-    "doctor": "node scripts/doctor.js",
-    "test": "node --test test/core.test.js"
-  },
   "engines": {
     "node": ">=20.0.0"
   },
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "deploy": "node src/deploy-commands.js",
+    "doctor": "node scripts/doctor.js",
+    "check": "node scripts/check.js",
+    "audio-test": "node scripts/audio-test.js",
+    "install:ytdlp": "node scripts/install-ytdlp.js",
+    "test": "node --test test/core.test.js"
+  },
+  "keywords": [
+    "discord",
+    "music",
+    "bot",
+    "youtube",
+    "spotify",
+    "radio",
+    "pterodactyl"
+  ],
+  "license": "MIT",
   "dependencies": {
-    "discord.js": "^14.24.0",
-    "dotenv": "^16.6.1",
-    "lavalink-client": "^2.11.0"
+    "@discordjs/voice": "^0.19.2",
+    "discord.js": "^14.28.1",
+    "dotenv": "^18.0.9",
+    "ffmpeg-static": "^5.3.0",
+    "opusscript": "^0.1.1"
+  },
+  "optionalDependencies": {
+    "@discordjs/opus": "^0.10.0"
   }
 }
