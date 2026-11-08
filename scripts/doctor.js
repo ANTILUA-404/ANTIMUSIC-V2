@@ -63,6 +63,19 @@ else add('warn', 'GUILD_ID kosong', 'command global butuh sampai 1 jam muncul');
 if (config.spotify.enabled) add('ok', 'Spotify credentials terisi', 'playlist/album Spotify didukung penuh');
 else add('warn', 'Spotify credentials kosong', 'masih jalan via halaman embed (maks 50 track/playlist)');
 
+// Audio engine
+const lavalink = config.audio.lavalink;
+if (config.audio.engine === 'local') {
+  add('ok', 'Audio engine: lokal', 'yt-dlp + FFmpeg (tanpa server tambahan)');
+} else if (!lavalink.enabled) {
+  add('ok', 'Audio engine: lokal', 'LAVALINK_HOST kosong -> engine lokal');
+} else {
+  const nodes = lavalink.nodes.map((node) => `${node.host}:${node.port}${node.secure ? ' (TLS)' : ''}`).join(', ');
+  add('ok', `Audio engine: ${config.audio.engine}`, `node: ${nodes}`);
+  if (config.audio.fallbackLocal) add('ok', 'Fallback lokal aktif', 'kalau Lavalink mati, bot tetap bunyi');
+  else add('warn', 'Fallback lokal MATI', 'bot berhenti kalau Lavalink tidak tersedia');
+}
+
 // Opus
 try {
   await import('opusscript');

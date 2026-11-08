@@ -28,12 +28,21 @@ export function startHealthServer(client, { version = 'unknown' } = {}) {
     }
 
     const ready = client.isReady();
+    const engine = client.audioEngine?.status?.() ?? null;
     const body = {
       status: ready ? 'ok' : 'starting',
       version,
       uptime: Math.round(process.uptime()),
       guilds: client.guilds?.cache?.size ?? 0,
       players: client.players?.size ?? 0,
+      engine: engine
+        ? {
+            name: engine.name,
+            ready: engine.ready,
+            detail: engine.detail,
+            nodes: engine.nodes?.map((node) => ({ id: node.id, connected: node.connected })) ?? undefined,
+          }
+        : null,
       memoryMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
       timestamp: new Date().toISOString(),
     };

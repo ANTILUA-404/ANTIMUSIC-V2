@@ -5,7 +5,7 @@ const CATEGORIES = [
   { name: '🎵 Pemutaran', commands: ['play', 'pause', 'resume', 'skip', 'stop', 'seek', 'jump'] },
   { name: '📻 Radio 24/7', commands: ['radio'] },
   { name: '📋 Antrian', commands: ['queue', 'nowplaying', 'remove', 'shuffle', 'loop', 'autoplay'] },
-  { name: '🎛️ Audio', commands: ['volume', 'filter'] },
+  { name: '🎛️ Audio', commands: ['volume', 'filter', 'engine'] },
   { name: '🔌 Lainnya', commands: ['disconnect', 'help'] },
 ];
 

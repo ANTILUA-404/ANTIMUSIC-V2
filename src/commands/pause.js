@@ -6,7 +6,7 @@ export default {
   data: new SlashCommandBuilder().setName('pause').setDescription('Pause lagu yang sedang diputar'),
   async execute(interaction, client) {
     const player = requirePlayer(client, interaction.guild);
-    player.pause();
+    await player.pause();
     await interaction.reply({ embeds: [successEmbed('Lagu di-pause. Pakai `/resume` buat lanjut.')] });
   },
 };

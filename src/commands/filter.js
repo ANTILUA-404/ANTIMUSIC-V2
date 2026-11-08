@@ -1,5 +1,5 @@
 import { SlashCommandBuilder } from 'discord.js';
-import { FILTERS } from '../structures/GuildPlayer.js';
+import { FILTERS } from '../audio/filters.js';
 import { successEmbed } from '../utils/discord.js';
 import { requirePlayer } from '../utils/guards.js';
 

@@ -1,4 +1,5 @@
 import test from 'node:test';
+import fs from 'node:fs';
 import assert from 'node:assert/strict';
 
 import {
@@ -10,7 +11,7 @@ import {
   truncate,
 } from '../src/utils/format.js';
 import { parseTimeInput } from '../src/utils/guards.js';
-import { FILTERS } from '../src/structures/GuildPlayer.js';
+import { FILTERS } from '../src/audio/filters.js';
 import { stationToTrack } from '../src/structures/RadioStore.js';
 import { Track } from '../src/structures/Track.js';
 
@@ -93,11 +94,12 @@ test('stationToTrack maps station kind to stream kind', () => {
 });
 
 test('all audio filters are non-empty strings except none', () => {
-  assert.equal(FILTERS.none, null);
+  assert.equal(FILTERS.none.ffmpeg, null);
   for (const [name, filter] of Object.entries(FILTERS)) {
     if (name === 'none') continue;
-    assert.equal(typeof filter, 'string', `${name} harus string`);
-    assert.ok(filter.length > 3, `${name} filter terlalu pendek`);
+    assert.equal(typeof filter.ffmpeg, 'string', `${name}.ffmpeg harus string`);
+    assert.ok(filter.ffmpeg.length > 3, `${name} filter terlalu pendek`);
+    assert.equal(typeof filter.lavalink, 'function', `${name}.lavalink harus fungsi`);
   }
 });
 
@@ -105,7 +107,8 @@ test('loadCommands memuat seluruh command dari folder commands', async () => {
   const { loadCommands } = await import('../src/loaders.js');
   const fakeClient = { commands: new Map() };
   await loadCommands(fakeClient);
-  assert.equal(fakeClient.commands.size, 18);
+  const expected = fs.readdirSync(new URL('../src/commands', import.meta.url)).filter((f) => f.endsWith('.js')).length;
+  assert.equal(fakeClient.commands.size, expected);
   assert.ok(fakeClient.commands.has('play'));
   assert.ok(fakeClient.commands.has('radio'));
 });
@@ -143,4 +146,92 @@ test('syncCommands mendaftar per-guild dan tidak mengulang saat payload sama', a
   const before = calls.length;
   await syncCommands(fakeClient);
   assert.equal(calls.length, before, 'tidak boleh memanggil API lagi');
+});
+
+test('GuildPlayer mengelola antrian di atas engine abstrak', async () => {
+  const { EventEmitter } = await import('node:events');
+  const { GuildPlayer } = await import('../src/structures/GuildPlayer.js');
+  const { Track } = await import('../src/structures/Track.js');
+
+  class FakeEngine extends EventEmitter {
+    constructor() {
+      super();
+      this.name = 'fake';
+      this.played = [];
+      this.stops = 0;
+      this.volume = 100;
+    }
+    handleRaw() {}
+    status() {
+      return { name: 'fake', ready: true, detail: 'test', guilds: 0 };
+    }
+    async ensureConnected() {}
+    async play(guild, track) {
+      this.played.push(track.title);
+      this.current = track;
+    }
+    async pause() {}
+    async resume() {}
+    async stop() {
+      this.stops += 1;
+    }
+    async destroy() {}
+    async setVolume(_g, volume) {
+      this.volume = volume;
+      return volume;
+    }
+    async seek() {}
+    async setFilter() {}
+    isPlaying() {
+      return Boolean(this.current);
+    }
+    isPaused() {
+      return false;
+    }
+    position() {
+      return 0;
+    }
+    guildStatus() {
+      return { connected: true, playing: Boolean(this.current), paused: false, position: 0 };
+    }
+    end() {
+      this.emit('trackEnd', 'g1', 'finished');
+    }
+  }
+
+  const engine = new FakeEngine();
+  const client = {
+    players: new Map(),
+    audioEngine: engine,
+    user: { id: 'bot' },
+    ensureEngine: async () => engine,
+  };
+  const guild = { id: 'g1', members: { me: { voice: { channel: { id: 'c1' } } } } };
+
+  const player = new GuildPlayer(client, guild);
+  player._ignoreEndMs = 0; // jangan tunggu jendela anti-dobel
+
+  const a = Track.fromDirectUrl('https://x/a.mp3', { title: 'A' });
+  const b = Track.fromDirectUrl('https://x/b.mp3', { title: 'B' });
+
+  await player.enqueue([a, b]);
+  assert.deepEqual(engine.played, ['A'], 'track pertama langsung diputar');
+  assert.equal(player.queue.length, 1);
+
+  engine.end();
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.deepEqual(engine.played, ['A', 'B'], 'trackEnd memajukan antrian');
+  assert.equal(player.current.title, 'B');
+
+  player.loop = 'track';
+  engine.end();
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(engine.played.at(-1), 'B', 'loop track mengulang lagu yang sama');
+
+  player.loop = 'off';
+  await player.skip();
+  assert.ok(engine.stops >= 1, 'skip memanggil engine.stop');
+  assert.equal(player.current, null, 'antrian habis setelah skip');
+
+  await player.destroy();
 });

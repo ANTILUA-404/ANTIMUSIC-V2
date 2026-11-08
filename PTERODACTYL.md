@@ -303,6 +303,24 @@ npm run install:ffmpeg -- --force
 
 ---
 
+### Lavalink opsional
+
+Kalau kamu menjalankan Lavalink di Railway/VPS, isi di tab Startup:
+
+\`\`\`env
+AUDIO_ENGINE=auto
+AUDIO_FALLBACK_LOCAL=true
+LAVALINK_HOST=xxx.up.railway.app
+LAVALINK_PORT=443
+LAVALINK_PASSWORD=rahasia
+LAVALINK_SECURE=true
+\`\`\`
+
+Panduan lengkap: **[RAILWAY.md](RAILWAY.md)**.
+Kalau Lavalink mati, bot otomatis kembali ke engine lokal — tidak perlu ubah apa pun.
+
+---
+
 ## 7. Whitelist lisensi
 
 Dua cara mengelola server yang boleh memakai bot:

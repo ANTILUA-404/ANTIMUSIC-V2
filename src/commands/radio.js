@@ -145,7 +145,7 @@ export default {
       clear247(guildId);
       if (player) {
         player.stopRadio();
-        player.stop();
+        await player.stop();
         await player.destroy();
       }
       return interaction.reply({ embeds: [successEmbed('Radio 24/7 dimatikan, bot keluar dari voice channel.')] });

@@ -11,7 +11,7 @@ export default {
     if (wasRadio) clear247(interaction.guild.id);
 
     player.stopRadio();
-    player.stop();
+    await player.stop();
     await player.destroy();
 
     await interaction.reply({

@@ -71,6 +71,15 @@ export default {
       status: 'online',
     });
 
+    // Engine audio dibuat di sini karena butuh client.user (Lavalink auth).
+    try {
+      const engine = await client.ensureEngine();
+      log.info(`Audio engine: ${engine.name} — ${engine.status().detail}`);
+    } catch (error) {
+      log.error(`Engine audio gagal disiapkan: ${error.message}`);
+      log.error('Bot tetap online, tapi /play tidak akan berbunyi sampai engine siap.');
+    }
+
     await sweepUnauthorizedGuilds(client);
 
     // Zero-setup: slash command didaftarkan sendiri, tidak perlu `npm run deploy`.

@@ -36,7 +36,7 @@ export async function ensureVoiceChannel(interaction) {
 
 export function requirePlayer(client, guild) {
   const player = client.players.get(guild.id);
-  if (!player || !player.connection) {
+  if (!player || !player.connected) {
     throw new UserError('Bot belum ada di voice channel. Pakai `/play` dulu.');
   }
   return player;

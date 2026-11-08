@@ -11,7 +11,7 @@ export default {
     if (!guild) return;
 
     const player = client.players.get(guild.id);
-    if (!player?.connection) return;
+    if (!player?.connected) return;
 
     // Bot itself got disconnected / kicked.
     if (newState.id === client.user.id) {
@@ -34,7 +34,7 @@ export default {
     // Everyone left - wait a bit in case they come right back.
     setTimeout(async () => {
       const livePlayer = client.players.get(guild.id);
-      if (!livePlayer?.connection || livePlayer.radio) return;
+      if (!livePlayer?.connected || livePlayer.radio) return;
       const currentChannel = guild.members.me?.voice?.channel;
       if (!currentChannel) return;
       const stillEmpty = currentChannel.members.filter((member) => !member.user.bot).size === 0;

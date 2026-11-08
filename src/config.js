@@ -60,6 +60,49 @@ function idleLeaveSeconds() {
   return 60;
 }
 
+/**
+ * Node Lavalink (mis. Railway). Kosong = engine lokal (yt-dlp + FFmpeg).
+ * `LAVALINK_NODES` (JSON array) menang atas variabel tunggal, berguna untuk failover.
+ */
+function lavalinkNodes() {
+  const raw = process.env.LAVALINK_NODES?.trim();
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length) {
+        return parsed.map((node, index) => ({
+          id: String(node.id ?? `node-${index + 1}`),
+          host: String(node.host),
+          port: toNumber(node.port, 443),
+          authorization: String(node.password ?? node.authorization ?? ''),
+          secure: node.secure !== false,
+          retryAmount: toNumber(process.env.LAVALINK_RETRY_AMOUNT, 10),
+          retryDelay: toNumber(process.env.LAVALINK_RETRY_DELAY_MS, 5000),
+        }));
+      }
+    } catch (error) {
+      console.warn('[config] LAVALINK_NODES bukan JSON valid, diabaikan');
+    }
+  }
+
+  const host = process.env.LAVALINK_HOST?.trim();
+  if (!host) return [];
+
+  return [
+    {
+      id: process.env.LAVALINK_NODE_ID?.trim() || 'main',
+      host,
+      port: toNumber(process.env.LAVALINK_PORT, 443),
+      authorization: process.env.LAVALINK_PASSWORD?.trim() || '',
+      secure: toBool(process.env.LAVALINK_SECURE, true),
+      retryAmount: toNumber(process.env.LAVALINK_RETRY_AMOUNT, 10),
+      retryDelay: toNumber(process.env.LAVALINK_RETRY_DELAY_MS, 5000),
+    },
+  ];
+}
+
+const LAVALINK_NODES = lavalinkNodes();
+
 export const config = {
   token: process.env.DISCORD_TOKEN?.trim() || '',
   clientId: process.env.CLIENT_ID?.trim() || '',
@@ -118,6 +161,22 @@ export const config = {
     maxRetries: toNumber(process.env.RADIO_MAX_RETRIES, 10),
     /** Rejoin saved 24/7 sessions after a restart. */
     restoreOnBoot: toBool(process.env.RADIO_RESTORE_ON_BOOT, true),
+  },
+
+  /** Pilihan engine audio: lavalink (utama) atau lokal (yt-dlp + FFmpeg). */
+  audio: {
+    /** auto = coba Lavalink dulu, kalau gagal pakai lokal. */
+    engine: ['auto', 'lavalink', 'local'].includes(process.env.AUDIO_ENGINE)
+      ? process.env.AUDIO_ENGINE
+      : 'auto',
+    /** Kalau Lavalink tidak bisa dihubungi, turun ke engine lokal (bukan mati). */
+    fallbackLocal: toBool(process.env.AUDIO_FALLBACK_LOCAL, true),
+    lavalink: {
+      enabled: LAVALINK_NODES.length > 0,
+      nodes: LAVALINK_NODES,
+      searchSource: process.env.LAVALINK_SEARCH_SOURCE?.trim() || 'youtube',
+      connectTimeoutMs: toNumber(process.env.LAVALINK_CONNECT_TIMEOUT_MS, 20_000),
+    },
   },
 
   /** Zero-setup: daftarkan slash command otomatis setiap start (kalau berubah). */

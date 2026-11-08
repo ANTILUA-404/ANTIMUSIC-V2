@@ -1,38 +1,19 @@
-import { spawn } from 'node:child_process';
-import {
-  AudioPlayerStatus,
-  NoSubscriberBehavior,
-  StreamType,
-  VoiceConnectionStatus,
-  createAudioPlayer,
-  createAudioResource,
-  entersState,
-  getVoiceConnection,
-  joinVoiceChannel,
-} from '@discordjs/voice';
 import { config } from '../config.js';
 import { createLogger } from '../utils/logger.js';
-import { relatedTracks, spawnYtdlpAudio } from '../utils/ytdlp.js';
+import { relatedTracks } from '../utils/ytdlp.js';
 import { UserError } from '../utils/guards.js';
 import { stationToTrack } from './RadioStore.js';
 import { Track } from './Track.js';
 
 const log = createLogger('player');
 
-const USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
-
-export const FILTERS = {
-  none: null,
-  bassboost: 'bass=g=12,dynaudnorm=f=200',
-  nightcore: 'asetrate=48000*1.25,aresample=48000',
-  vaporwave: 'asetrate=48000*0.8,aresample=48000',
-  '8d': 'apulsator=hz=0.09',
-  karaoke: 'pan=stereo|c0=c0-c1|c1=c1-c0',
-  treble: 'treble=g=8',
-  soft: 'lowpass=f=8000,volume=0.85',
-};
-
+/**
+ * Antrian + kontrol per-guild.
+ *
+ * Player ini TIDAK tahu engine mana yang dipakai: semua pemutaran didelegasikan
+ * ke `client.audioEngine` (Lavalink atau lokal). Queue, loop, radio 24/7,
+ * autoplay, dan idle-leave tetap sama di kedua engine.
+ */
 export class GuildPlayer {
   constructor(client, guild) {
     this.client = client;
@@ -46,126 +27,86 @@ export class GuildPlayer {
     this.filter = 'none';
     this.radio = null;
 
-    this.connection = null;
-    this.player = createAudioPlayer({
-      behaviors: { noSubscriber: NoSubscriberBehavior.Play, maxMissedFrames: 5000 },
-    });
-
+    this._channel = null;
     this._advancing = false;
-    this._suppressIdle = false;
     this._idleTimer = null;
     this._retryTimer = null;
     this._radioRetries = 0;
-    this._processes = [];
-    this._resource = null;
-    this._ffmpegError = '';
-    this._seekOffset = 0;
+    this._ignoreEndUntil = 0;
+    /** Jendela abaikan event trackEnd setelah pergantian track (ms). */
+    this._ignoreEndMs = 1500;
     this._startedAt = 0;
     this._destroyed = false;
-
-    this.player.on(AudioPlayerStatus.Idle, () => this.#onIdle());
-    this.player.on(AudioPlayerStatus.Playing, () => {
-      if (!this._startedAt) this._startedAt = Date.now();
-    });
-    this.player.on(AudioPlayerStatus.Paused, () => {
-      this._pausedAt = Date.now();
-    });
-    this.player.on('error', (error) => {
-      log.error(`[${this.guild.id}] audio player error: ${error.message}`);
-    });
+    this._bound = false;
   }
 
-  /* ------------------------------- getters ------------------------------- */
+  get engine() {
+    return this.client.audioEngine;
+  }
 
   get voiceChannel() {
     return this.guild.members.me?.voice?.channel ?? null;
   }
 
-  get paused() {
-    return this.player.state.status === AudioPlayerStatus.Paused;
+  get connected() {
+    return Boolean(this.engine?.guildStatus(this.guild.id)?.connected);
   }
 
   get playing() {
-    return this.player.state.status === AudioPlayerStatus.Playing;
+    return Boolean(this.engine?.isPlaying(this.guild.id));
   }
 
-  /** Seconds played of the current track (0 for live streams). */
+  get paused() {
+    return Boolean(this.engine?.isPaused(this.guild.id));
+  }
+
+  /** Posisi lagu dalam DETIK. */
   get elapsed() {
-    if (!this.current || this.current.isStream) return 0;
-    if (!this._startedAt) return this._seekOffset;
-    const end = this.paused ? this._pausedAt || Date.now() : Date.now();
-    const running = (end - this._startedAt) / 1000;
-    return Math.max(0, Math.min(this.current.duration, this._seekOffset + running));
+    return (this.engine?.position(this.guild.id) ?? 0) / 1000;
   }
 
-  /* ----------------------------- connection ------------------------------ */
+  /* ------------------------------ engine wiring --------------------------- */
+
+  #ensureBound() {
+    if (this._bound) return;
+    const engine = this.engine;
+    if (!engine) return;
+
+    engine.on('trackEnd', (guildId) => {
+      if (guildId === this.guild.id) this.#onTrackEnd();
+    });
+
+    engine.on('error', (guildId, error) => {
+      if (guildId === this.guild.id) log.warn(`[${this.guild.id}] engine: ${error?.message ?? error}`);
+    });
+
+    engine.on('disconnect', (guildId) => {
+      if (guildId !== this.guild.id) return;
+      log.warn(`[${this.guild.id}] voice terputus`);
+      if (this.radio) this.#scheduleRadioRetry();
+    });
+
+    this._bound = true;
+  }
+
+  async #ready() {
+    this.#ensureBound();
+    await this.client.ensureEngine();
+    this.#ensureBound();
+    if (!this.engine) throw new UserError('Engine audio belum siap, coba lagi sebentar.');
+    return this.engine;
+  }
+
+  /* ------------------------------- connection ---------------------------- */
 
   async join(channel) {
-    const existing = getVoiceConnection(this.guild.id);
-    if (existing && existing.joinConfig.channelId === channel.id) {
-      this.connection = existing;
-      this.#attach(existing);
-      existing.subscribe(this.player);
-      return this.connection;
-    }
-    if (existing) existing.destroy();
-
-    this.connection = joinVoiceChannel({
-      channelId: channel.id,
-      guildId: this.guild.id,
-      adapterCreator: this.guild.voiceAdapterCreator,
-      selfDeaf: true,
-      selfMute: false,
-    });
-    this.#attach(this.connection);
-
-    try {
-      await entersState(this.connection, VoiceConnectionStatus.Ready, 20_000);
-    } catch {
-      this.connection.destroy();
-      this.connection = null;
-      throw new UserError('Gagal connect ke voice channel (timeout). Cek permission bot: Connect + Speak.');
-    }
-
-    this.connection.subscribe(this.player);
+    const engine = await this.#ready();
+    this._channel = channel;
+    await engine.ensureConnected(this.guild, channel);
     this.#clearIdleTimer();
-    return this.connection;
   }
 
-  #attach(connection) {
-    if (connection.__musicBotOwner === this) return;
-    connection.__musicBotOwner = this;
-
-    connection.on('stateChange', (oldState, newState) => {
-      log.debug(`[${this.guild.id}] voice: ${oldState.status} -> ${newState.status}`);
-      if (newState.status === VoiceConnectionStatus.Disconnected) {
-        if (this.radio) this.#tryReconnect(connection);
-        else this.destroy();
-      }
-      if (newState.status === VoiceConnectionStatus.Destroyed) {
-        this.#cleanupProcesses();
-      }
-    });
-    connection.on('error', (error) => log.warn(`[${this.guild.id}] voice error: ${error.message}`));
-  }
-
-  async #tryReconnect(connection) {
-    try {
-      await Promise.race([
-        entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
-        entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
-      ]);
-    } catch {
-      log.warn(`[${this.guild.id}] voice terputus, mencoba reconnect...`);
-      try {
-        connection.reconnect();
-      } catch (error) {
-        log.error(`[${this.guild.id}] reconnect gagal: ${error.message}`);
-      }
-    }
-  }
-
-  /* ------------------------------ playback ------------------------------- */
+  /* ------------------------------- playback ------------------------------ */
 
   async enqueue(tracks, { next = false } = {}) {
     const list = Array.isArray(tracks) ? tracks : [tracks];
@@ -187,7 +128,6 @@ export class GuildPlayer {
     this._advancing = true;
     try {
       this.#clearIdleTimer();
-      this.#killProcesses();
 
       for (let attempt = 0; attempt < 5; attempt += 1) {
         let track = this.#takeNext();
@@ -211,7 +151,6 @@ export class GuildPlayer {
       }
 
       this.current = null;
-      this._startedAt = 0;
 
       if (this.radio) {
         this.#scheduleRadioRetry();
@@ -224,44 +163,58 @@ export class GuildPlayer {
   }
 
   async startTrack(track, { seek = 0 } = {}) {
-    await track.ensurePlayable();
-    // Kill any previous FFmpeg/yt-dlp pair first, otherwise a stale process keeps
-    // buffering audio into a stream nobody reads (leak + overlapping sound).
-    this.#killProcesses();
+    const engine = await this.#ready();
+    const channel = this._channel ?? this.voiceChannel;
+    if (!channel) throw new UserError('Bot belum ada di voice channel.');
 
-    const resource = this.#createResource(track, seek);
+    this._channel = channel;
+    // Abaikan event "trackEnd" yang muncul akibat pergantian track.
+    this._ignoreEndUntil = Date.now() + this._ignoreEndMs;
+
+    await engine.ensureConnected(this.guild, channel);
+    await engine.play(this.guild, track, { seek });
 
     this.current = track;
-    this._seekOffset = seek;
     this._startedAt = Date.now();
-    this._pausedAt = 0;
-    this._resource = resource;
-    this.player.play(resource);
+    this._radioRetries = 0;
     this.#clearIdleTimer();
   }
 
-  async play() {
-    if (this.paused) return this.resume();
-    if (this.current && this.player.state.status === AudioPlayerStatus.AutoPaused) {
-      this.player.unpause();
-    }
-    return undefined;
+  #takeNext() {
+    const next = this.queue.shift() ?? null;
+    if (next && this.loop === 'queue') this.queue.push(next);
+    return next;
   }
 
-  pause() {
+  #onTrackEnd() {
+    if (this._destroyed) return;
+    if (Date.now() < this._ignoreEndUntil) return;
+
+    if (this.loop === 'track' && this.current && !this.radio) {
+      const track = this.current;
+      this.startTrack(track).catch((error) => {
+        log.warn(`[${this.guild.id}] loop track gagal: ${error.message}`);
+        this.playNext();
+      });
+      return;
+    }
+
+    this.playNext().catch((error) => log.error(`[${this.guild.id}] playNext error: ${error.message}`));
+  }
+
+  /* ------------------------------- controls ------------------------------ */
+
+  async pause() {
     if (!this.current) throw new UserError('Nggak ada yang sedang diputar.');
     if (this.paused) throw new UserError('Lagu sudah di-pause.');
-    this.player.pause(true);
+    await this.#ready();
+    await this.engine.pause(this.guild.id);
   }
 
-  resume() {
+  async resume() {
     if (!this.paused) throw new UserError('Lagu tidak sedang di-pause.');
-    this.player.unpause();
-    if (this._pausedAt) {
-      // Shift the clock forward so /nowplaying progress stays accurate.
-      this._startedAt += Date.now() - this._pausedAt;
-      this._pausedAt = 0;
-    }
+    await this.#ready();
+    await this.engine.resume(this.guild.id);
   }
 
   async skip(amount = 1) {
@@ -271,8 +224,9 @@ export class GuildPlayer {
     }
     if (!this.current && this.queue.length === 0) throw new UserError('Queue kosong.');
 
-    this._suppressIdle = true;
-    this.player.stop(true);
+    await this.#ready();
+    this._ignoreEndUntil = Date.now() + this._ignoreEndMs;
+    await this.engine.stop(this.guild.id);
 
     for (let i = 1; i < count && this.queue.length > 0; i += 1) this.queue.shift();
     this.current = null;
@@ -285,25 +239,24 @@ export class GuildPlayer {
     if (seconds < 0 || seconds > this.current.duration) {
       throw new UserError(`Posisi harus antara 0 dan ${Math.floor(this.current.duration)} detik.`);
     }
-    const track = this.current;
-    await this.startTrack(track, { seek: Math.floor(seconds) });
+
+    await this.#ready();
+    this._ignoreEndUntil = Date.now() + this._ignoreEndMs;
+    await this.engine.seek(this.guild.id, Math.floor(seconds * 1000));
   }
 
-  setVolume(value) {
+  async setVolume(value) {
     const volume = Math.max(0, Math.min(200, Math.floor(value)));
     this.volume = volume;
-    this._resource?.volume?.setVolume(volume / 100);
+    await this.#ready();
+    await this.engine.setVolume(this.guild.id, volume);
     return volume;
   }
 
   async setFilter(name) {
-    if (!(name in FILTERS)) throw new UserError(`Filter "${name}" tidak dikenal.`);
-    if (this.filter === name) return name;
+    await this.#ready();
     this.filter = name;
-    if (this.current && !this.current.isStream) {
-      const position = this.elapsed;
-      await this.startTrack(this.current, { seek: Math.floor(position) });
-    }
+    await this.engine.setFilter(this.guild.id, name);
     return name;
   }
 
@@ -320,27 +273,32 @@ export class GuildPlayer {
     return this.queue.splice(index, 1)[0];
   }
 
-  jump(index) {
+  async jump(index) {
     if (index < 0 || index >= this.queue.length) throw new UserError('Index di luar jangkauan queue.');
     const [target] = this.queue.splice(index, 1);
     this.queue.unshift(target);
-    this._suppressIdle = true;
-    this.player.stop(true);
+
+    await this.#ready();
+    this._ignoreEndUntil = Date.now() + this._ignoreEndMs;
+    await this.engine.stop(this.guild.id);
     this.current = null;
-    return this.playNext();
+    await this.playNext();
   }
 
-  stop() {
+  async stop() {
     this.queue = [];
     this.current = null;
     this.radio = null;
-    this._startedAt = 0;
-    this._seekOffset = 0;
-    this._suppressIdle = true;
-    this.player.stop(true);
-    this.#killProcesses();
+    this._ignoreEndUntil = Date.now() + this._ignoreEndMs;
+    try {
+      await this.engine?.stop(this.guild.id);
+    } catch (error) {
+      log.debug(`[${this.guild.id}] stop: ${error.message}`);
+    }
     this.#scheduleIdleLeave();
   }
+
+  /* --------------------------------- radio ------------------------------- */
 
   async startRadio(station, { requester = null } = {}) {
     const track = stationToTrack(station, requester);
@@ -357,171 +315,10 @@ export class GuildPlayer {
     this._radioRetries = 0;
   }
 
-  async destroy() {
-    if (this._destroyed) return;
-    this._destroyed = true;
-    this.#clearIdleTimer();
-    this.#clearRetryTimer();
-    this.queue = [];
-    this.current = null;
-    this.radio = null;
-    try {
-      this.player.stop(true);
-    } catch {
-      /* ignore */
-    }
-    this.#killProcesses();
-    const connection = getVoiceConnection(this.guild.id);
-    if (connection) connection.destroy();
-    this.connection = null;
-    this.client.players.delete(this.guild.id);
-  }
-
-  /* ------------------------------ internals ------------------------------ */
-
-  #onIdle() {
-    if (this._suppressIdle) {
-      this._suppressIdle = false;
-      return;
-    }
-    if (this._destroyed) return;
-
-    if (this.loop === 'track' && this.current && !this.radio) {
-      const track = this.current;
-      this.startTrack(track).catch((error) => {
-        log.warn(`[${this.guild.id}] loop track gagal: ${error.message}`);
-        this.playNext();
-      });
-      return;
-    }
-
-    this.playNext().catch((error) => log.error(`[${this.guild.id}] playNext error: ${error.message}`));
-  }
-
-  #takeNext() {
-    const next = this.queue.shift() ?? null;
-    if (next && this.loop === 'queue') this.queue.push(next);
-    return next;
-  }
-
-  #createResource(track, seek = 0) {
-    const output = [
-      '-vn',
-      '-f',
-      's16le',
-      '-ar',
-      String(config.ffmpeg.sampleRate),
-      '-ac',
-      String(config.ffmpeg.channels),
-    ];
-    // -af must come before the output target, otherwise FFmpeg treats it as a new output.
-    const filter = FILTERS[this.filter];
-    if (filter) output.push('-af', filter);
-    output.push('pipe:1');
-
-    let ffmpeg;
-
-    if (track.stream.kind === 'url') {
-      const args = ['-hide_banner', '-loglevel', 'error'];
-      if (seek > 0) args.push('-ss', String(Math.floor(seek)));
-      args.push(
-        '-reconnect',
-        '1',
-        '-reconnect_streamed',
-        '1',
-        '-reconnect_delay_max',
-        '5',
-        '-user_agent',
-        USER_AGENT,
-        '-i',
-        track.stream.target,
-        ...output,
-      );
-      ffmpeg = spawn(config.ffmpeg.bin, args, { windowsHide: true });
-    } else {
-      const downloader = spawnYtdlpAudio(track.stream.target, { seek });
-      ffmpeg = spawn(
-        config.ffmpeg.bin,
-        ['-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', ...output],
-        { windowsHide: true },
-      );
-
-      downloader.child.stdout.pipe(ffmpeg.stdin);
-      ffmpeg.stdin.on('error', () => {});
-      downloader.child.stdout.on('error', () => {});
-      ffmpeg.on('close', () => downloader.kill());
-      this._processes.push(downloader);
-    }
-
-    this._ffmpegError = '';
-    ffmpeg.stderr?.setEncoding('utf8');
-    ffmpeg.stderr?.on('data', (chunk) => {
-      this._ffmpegError = (this._ffmpegError + chunk).slice(-600);
-    });
-    ffmpeg.on('error', (error) => log.error(`[${this.guild.id}] ffmpeg: ${error.message}`));
-    ffmpeg.on('close', (code) => {
-      if (code && code !== 0 && this._ffmpegError) {
-        log.debug(`[${this.guild.id}] ffmpeg exit ${code}: ${this._ffmpegError.slice(-200)}`);
-      }
-    });
-
-    this._processes.push({ kill: () => this.#safeKill(ffmpeg) });
-
-    const resource = createAudioResource(ffmpeg.stdout, {
-      inputType: StreamType.Raw,
-      inlineVolume: true,
-      metadata: track,
-    });
-    resource.volume?.setVolume(this.volume / 100);
-    return resource;
-  }
-
-  #safeKill(child) {
-    try {
-      if (!child.killed) child.kill('SIGKILL');
-    } catch {
-      /* already gone */
-    }
-  }
-
-  #killProcesses() {
-    for (const proc of this._processes) {
-      try {
-        proc.kill();
-      } catch {
-        /* ignore */
-      }
-    }
-    this._processes = [];
-  }
-
-  #cleanupProcesses() {
-    this.#killProcesses();
-  }
-
-  async #fetchAutoplay() {
-    if (!this.current) return [];
-    const videoId = this.current.stream?.target?.match(/[?&]v=([\w-]{11})/)?.[1] ||
-      this.current.url?.match(/[?&]v=([\w-]{11})/)?.[1];
-    if (!videoId) return [];
-
-    const played = new Set(this.#recentTitles());
-    const related = await relatedTracks(videoId, 10);
-    const fresh = related.filter((track) => !played.has(track.title.toLowerCase()));
-
-    return fresh.slice(0, 5).map((item) => Track.fromYtdlp(item, this.client.user?.id ?? null, 'Autoplay'));
-  }
-
-  #recentTitles() {
-    const titles = this.queue.map((track) => track.title.toLowerCase());
-    if (this.current) titles.push(this.current.title.toLowerCase());
-    return titles;
-  }
-
   #scheduleRadioRetry() {
-    if (!this.radio) return;
+    if (!this.radio || this._destroyed) return;
 
-    // Played fine for a while before dropping? Treat it as a fresh failure streak.
+    // Sempat main lama sebelum putus? hitungan gagal di-reset.
     if (this._startedAt && Date.now() - this._startedAt > 60_000) this._radioRetries = 0;
     this._radioRetries += 1;
 
@@ -537,11 +334,50 @@ export class GuildPlayer {
     this.#clearRetryTimer();
     this._retryTimer = setTimeout(() => {
       if (!this.radio) return;
+      this._startedAt = Date.now();
       this.startTrack(this.radio.track).catch((error) => {
         log.warn(`[${this.guild.id}] radio retry gagal: ${error.message}`);
         this.#scheduleRadioRetry();
       });
     }, delay);
+    this._retryTimer.unref?.();
+  }
+
+  /* -------------------------------- lifecycle ---------------------------- */
+
+  async destroy() {
+    if (this._destroyed) return;
+    this._destroyed = true;
+    this.#clearIdleTimer();
+    this.#clearRetryTimer();
+    this.queue = [];
+    this.current = null;
+    this.radio = null;
+
+    try {
+      await this.engine?.destroy(this.guild.id);
+    } catch (error) {
+      log.debug(`[${this.guild.id}] destroy engine: ${error.message}`);
+    }
+    this.client.players.delete(this.guild.id);
+  }
+
+  #fetchAutoplay() {
+    if (!this.current) return Promise.resolve([]);
+    const videoId =
+      this.current.stream?.target?.match(/[?&]v=([\w-]{11})/)?.[1] ||
+      this.current.url?.match(/[?&]v=([\w-]{11})/)?.[1];
+    if (!videoId) return Promise.resolve([]);
+
+    const played = new Set(this.queue.map((track) => track.title.toLowerCase()));
+    played.add(this.current.title.toLowerCase());
+
+    return relatedTracks(videoId, 10).then((related) =>
+      related
+        .filter((item) => !played.has(item.title.toLowerCase()))
+        .slice(0, 5)
+        .map((item) => Track.fromYtdlp(item, this.client.user?.id ?? null, 'Autoplay')),
+    );
   }
 
   #scheduleIdleLeave() {
@@ -554,6 +390,7 @@ export class GuildPlayer {
       log.info(`[${this.guild.id}] idle ${config.defaults.idleLeaveSeconds}s, keluar dari voice.`);
       this.destroy();
     }, ms);
+    this._idleTimer.unref?.();
   }
 
   #clearIdleTimer() {

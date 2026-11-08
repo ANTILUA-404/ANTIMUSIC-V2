@@ -11,7 +11,7 @@ export default {
     ),
   async execute(interaction, client) {
     const player = requirePlayer(client, interaction.guild);
-    const level = player.setVolume(interaction.options.getInteger('level', true));
+    const level = await player.setVolume(interaction.options.getInteger('level', true));
     await interaction.reply({ embeds: [successEmbed(`Volume diset ke **${level}%**.`)] });
   },
 };

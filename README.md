@@ -1,14 +1,39 @@
 # ANTIMUSIC v3
 
-Discord music bot bertenaga **Discord.js 14 + yt-dlp + FFmpeg**.
-**Tanpa Lavalink, tanpa Java.** Satu proses Node.js, satu perintah start.
+Discord music bot bertenaga **Discord.js 14**, dengan **dua engine audio**:
+**lokal (yt-dlp + FFmpeg)** sebagai default tanpa Java, atau **Lavalink** (mis. di Railway)
+kalau mau kualitas & sumber maksimal. Pilih lewat satu variabel, dan kalau Lavalink mati
+bot otomatis turun ke engine lokal.
 
 Mode **24/7 radio**, **whitelist lisensi server**, **health endpoint untuk panel**, dan
 dukungan **YouTube / Spotify / SoundCloud / Bandcamp / Twitch / Vimeo / link stream langsung**.
 
 ---
 
-## Kenapa v3? (dan kenapa Lavalink dibuang)
+## Dua engine audio
+
+| | Lokal (default) | Lavalink |
+|---|---|---|
+| Butuh Java/server tambahan | tidak | ya (Railway/VPS) |
+| CPU bot saat memutar | sedang (FFmpeg + Opus di bot) | ~0 (semua di server) |
+| Filter | 7 preset FFmpeg | DSP asli (EQ, timescale, rotation, karaoke, lowpass) |
+| Sumber | yt-dlp: YouTube/SoundCloud/Bandcamp/Twitch/Vimeo/HTTP | plugin YouTube + LavaSrc (Spotify/Deezer/Apple) |
+| Kualitas Opus | ditentukan Discord | `opusEncodingQuality: 10` |
+| Kalau server tambahan mati | — | **fallback otomatis ke lokal** |
+
+```env
+AUDIO_ENGINE=auto      # auto | lavalink | local
+```
+
+`auto` = coba Lavalink dulu, gagal? pakai lokal. Panduan Lavalink: **[RAILWAY.md](RAILWAY.md)**.
+
+> Catatan jujur: plafon kualitas tetap **bitrate voice channel Discord** (64/128/256 kbps
+> tergantung boost server). Lavalink menaikkan kestabilan, DSP, dan kualitas encoding di
+> sisi server — bukan melewati batas Discord.
+
+---
+
+## Kenapa v3? (dan kenapa Lavalink dibuang sebagai default)
 
 v2 jalan di atas Lavalink v4 embedded. Itu keputusan yang benar untuk saat itu, tapi
 di Pterodactyl biayanya mahal:
@@ -131,6 +156,7 @@ npm run audio-test   # tes pipeline audio nyata (tanpa Discord)
 | `/loop <off\|track\|queue>` | Mode pengulangan |
 | `/volume <0-200>` | Volume |
 | `/filter <nama>` | Pasang audio filter |
+| `/engine status` / `reconnect` | Lihat engine aktif & status node Lavalink |
 | `/autoplay <on\|off>` | Lagu mirip otomatis |
 | `/radio start <station>` | **Mode radio 24/7** |
 | `/radio stop` / `status` / `list` / `add` / `remove` | Kelola radio |
@@ -207,6 +233,13 @@ Bot memakai *Client Credentials flow* (metadata publik saja, tanpa login user).
 | `OWNER_USERNAME` | `owner` | Nama yang muncul di panel penolakan |
 | `OWNER_USER_ID` | — | Memunculkan tombol "Hubungi Owner" |
 | `WHITELIST_LEAVE_UNAUTHORIZED` | `true` | Keluar dari server tanpa lisensi |
+| `AUDIO_ENGINE` | `auto` | `auto`/`lavalink`/`local` |
+| `AUDIO_FALLBACK_LOCAL` | `true` | Turun ke lokal kalau Lavalink mati |
+| `LAVALINK_HOST` | — | Domain node (kosong = engine lokal) |
+| `LAVALINK_PORT` | `443` | Port node |
+| `LAVALINK_PASSWORD` | — | Password node |
+| `LAVALINK_SECURE` | `true` | TLS (wajib untuk Railway) |
+| `LAVALINK_SEARCH_SOURCE` | `youtube` | `youtube`/`ytmsearch`/`soundcloud` |
 | `LOG_LEVEL` | `info` | `error`/`warn`/`info`/`debug` |
 
 ---
@@ -258,6 +291,7 @@ index.js / start.js          # entrypoint + bootstrap npm install otomatis
 deploy/pterodactyl-egg.json  # egg siap import (nol setup)
 src/
 ├── index.js                 # bootstrap: load command/event, yt-dlp, health, login
+├── audio/                   # engine audio: lavalink.js, local.js, filters.js
 ├── config.js                # semua env + resolusi path binary
 ├── health.js                # HTTP health endpoint untuk panel
 ├── whitelist.js             # lisensi server (env + data/whitelist.json)
@@ -275,6 +309,7 @@ src/
 ├── utils/                   # ytdlp(+install), ffmpeg-install, command-sync, store, format, logger, guards, embed
 └── data/stations.js         # preset radio
 
+railway/                     # Dockerfile + start.sh untuk Lavalink di Railway
 scripts/                     # check, doctor, audio-test, install-ffmpeg, install-ytdlp, postinstall
 test/core.test.js            # unit test (node:test)
 ```
