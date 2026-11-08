@@ -5,6 +5,7 @@ import { config, ROOT } from './config.js';
 import { startHealthServer } from './health.js';
 import { MusicClient } from './structures/MusicClient.js';
 import { createLogger } from './utils/logger.js';
+import { ensureFfmpeg } from './utils/ffmpeg-install.js';
 import { ensureYtdlp } from './utils/ytdlp-install.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -86,6 +87,8 @@ async function main() {
     process.exit(1);
   }
 
+  // FFmpeg dulu: yt-dlp butuh tahu lokasinya untuk stream live/HLS.
+  await ensureFfmpeg();
   await ensureYtdlp();
   startHealthServer(client, { version: pkg.version });
 

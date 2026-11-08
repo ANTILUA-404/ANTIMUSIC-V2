@@ -2,7 +2,6 @@ import 'dotenv/config';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import ffmpegStatic from 'ffmpeg-static';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -21,6 +20,7 @@ const toBool = (value, fallback) => {
 
 const binDir = path.join(ROOT, 'bin');
 const localYtdlp = path.join(binDir, process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp');
+const localFfmpeg = path.join(binDir, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
 
 /**
  * Resolution order for yt-dlp:
@@ -33,6 +33,20 @@ function resolveYtdlp() {
   if (fromEnv) return fromEnv;
   if (fs.existsSync(localYtdlp)) return localYtdlp;
   return 'yt-dlp';
+}
+
+/**
+ * Resolution order for FFmpeg:
+ *   1. FFMPEG_PATH in .env
+ *   2. ./bin/ffmpeg  (auto-downloaded; tidak lagi bergantung pada install
+ *      script npm `ffmpeg-static` yang diblokir npm 11.7+)
+ *   3. `ffmpeg` from PATH
+ */
+function resolveFfmpeg() {
+  const fromEnv = process.env.FFMPEG_PATH?.trim();
+  if (fromEnv) return fromEnv;
+  if (fs.existsSync(localFfmpeg)) return localFfmpeg;
+  return 'ffmpeg';
 }
 
 /** IDLE_DESTROY_MS (v2) is accepted as an alias so old .env files keep working. */
@@ -78,7 +92,7 @@ export const config = {
   },
 
   ffmpeg: {
-    bin: process.env.FFMPEG_PATH?.trim() || ffmpegStatic || 'ffmpeg',
+    bin: resolveFfmpeg(),
     /** 48kHz stereo PCM as required by Discord voice. */
     sampleRate: 48_000,
     channels: 2,

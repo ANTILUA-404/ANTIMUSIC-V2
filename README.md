@@ -168,7 +168,7 @@ Bot memakai *Client Credentials flow* (metadata publik saja, tanpa login user).
 | `HEALTH_PORT` | — | Port health endpoint (di panel otomatis pakai `SERVER_PORT`) |
 | `YTDLP_PATH` | `./bin/yt-dlp` → PATH | Path binary yt-dlp |
 | `YTDLP_AUTO_INSTALL` | `true` | Unduh yt-dlp ke `./bin` kalau belum ada |
-| `FFMPEG_PATH` | `ffmpeg-static` | Override FFmpeg |
+| `FFMPEG_PATH` | `./bin/ffmpeg` → PATH | Override FFmpeg |
 | `YTDLP_COOKIES` | — | Cookie Netscape (konten age-restricted) |
 | `YTDLP_PROXY` | — | Proxy untuk yt-dlp |
 | `YTDLP_EXTRACTOR_ARGS` | — | Mis. `youtube:player_client=web,android` |
@@ -212,6 +212,8 @@ Bot memakai *Client Credentials flow* (metadata publik saja, tanpa login user).
 |---|---|
 | Bot join voice tapi **hening** | `npm run audio-test`. Kalau gagal → yt-dlp/FFmpeg bermasalah. Kalau lolos → cek permission **Speak** |
 | `yt-dlp tidak ditemukan` | `npm run install:ytdlp`, atau set `YTDLP_PATH` |
+| `ffmpeg: spawn ... ENOENT` | Binary FFmpeg belum ada (npm memblokir install script dependency). Jalankan `npm run install:ffmpeg`, atau cukup restart bot — versi ini mengunduh sendiri |
+| `npm warn allow-scripts` saat install | npm 11.7+ memblokir lifecycle script dependency. Tidak masalah: FFmpeg & yt-dlp diunduh oleh `postinstall` milik bot, bukan oleh dependency |
 | `Sign in to confirm you're not a bot` | `npm run install:ytdlp -- --force` (update), atau isi `YTDLP_COOKIES` dengan `cookies.txt` dari browser |
 | `HTTP Error 403` | Update yt-dlp; alternatif `YTDLP_EXTRACTOR_ARGS=youtube:player_client=web,android` |
 | `Gagal connect ke voice (timeout)` | Izin Connect/Speak kurang, atau channel penuh |
@@ -242,10 +244,10 @@ src/
 │   ├── Spotify.js           # Web API + fallback embed/oEmbed
 │   ├── RadioStore.js        # station + sesi 24/7 (JSON)
 │   └── MusicClient.js
-├── utils/                   # ytdlp, ytdlp-install, store, format, logger, guards, embed
+├── utils/                   # ytdlp(+install), ffmpeg-install, store, format, logger, guards, embed
 └── data/stations.js         # preset radio
 
-scripts/                     # check, doctor, audio-test, install-ytdlp
+scripts/                     # check, doctor, audio-test, install-ffmpeg, install-ytdlp, postinstall
 test/core.test.js            # unit test (node:test)
 ```
 

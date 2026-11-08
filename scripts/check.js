@@ -91,14 +91,21 @@ if (process.argv.includes('--skip-binaries')) {
 } else {
   try {
     const { config } = await import('../src/config.js');
-    const ffmpegPath = config.ffmpeg.bin;
-    if (fs.existsSync(ffmpegPath) || !ffmpegPath.includes(path.sep)) {
-      const version = execFileSync(ffmpegPath, ['-hide_banner', '-version'], { encoding: 'utf8', timeout: 15_000 })
+    const { isFfmpegUsable } = await import('../src/utils/ffmpeg-install.js');
+
+    const ffmpegBin = isFfmpegUsable(config.ffmpeg.bin)
+      ? config.ffmpeg.bin
+      : isFfmpegUsable('ffmpeg')
+        ? 'ffmpeg'
+        : null;
+
+    if (!ffmpegBin) {
+      fail('ffmpeg tidak ditemukan — jalankan: npm run install:ffmpeg');
+    } else {
+      const version = execFileSync(ffmpegBin, ['-hide_banner', '-version'], { encoding: 'utf8', timeout: 15_000 })
         .split('\n')[0]
         .trim();
       pass(`ffmpeg: ${version.slice(0, 60)}`);
-    } else {
-      fail(`ffmpeg tidak ditemukan di ${ffmpegPath}`);
     }
 
     const ytdlpVersion = execFileSync(config.ytdlp.bin, ['--version'], { encoding: 'utf8', timeout: 20_000 }).trim();

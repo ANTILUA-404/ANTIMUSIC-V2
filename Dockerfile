@@ -16,8 +16,8 @@ RUN npm install --omit=dev --no-audit --no-fund
 
 COPY . .
 
-# Bake yt-dlp ke dalam image supaya cold start tidak perlu unduh lagi.
-RUN node scripts/install-ytdlp.js
+# Bake FFmpeg + yt-dlp ke dalam image supaya cold start tidak perlu unduh lagi.
+RUN node scripts/install-ffmpeg.js && node scripts/install-ytdlp.js
 
 ENV NODE_ENV=production
 ENV LOG_LEVEL=info

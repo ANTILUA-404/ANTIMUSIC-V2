@@ -25,17 +25,16 @@ const major = Number(process.versions.node.split('.')[0]);
 add(major >= 18 ? 'ok' : 'bad', `Node.js ${process.versions.node}`, major >= 18 ? '' : 'butuh >= 18.17');
 
 // ffmpeg
+const { isFfmpegUsable } = await import('../src/utils/ffmpeg-install.js');
 const ffmpegPath = config.ffmpeg.bin;
-if (fs.existsSync(ffmpegPath) || !ffmpegPath.includes(path.sep)) {
-  try {
-    const out = execFileSync(ffmpegPath, ['-hide_banner', '-version'], { encoding: 'utf8', timeout: 15_000 });
-    const version = out.split('\n')[0].replace('ffmpeg version ', '').split(' ')[0];
-    add('ok', `FFmpeg ${version}`, ffmpegPath);
-  } catch {
-    add('bad', 'FFmpeg tidak bisa dijalankan', ffmpegPath);
-  }
+if (isFfmpegUsable(ffmpegPath)) {
+  const out = execFileSync(ffmpegPath, ['-hide_banner', '-version'], { encoding: 'utf8', timeout: 15_000 });
+  const version = out.split('\n')[0].replace('ffmpeg version ', '').split(' ')[0];
+  add('ok', `FFmpeg ${version}`, ffmpegPath);
+} else if (isFfmpegUsable('ffmpeg')) {
+  add('ok', 'FFmpeg dari PATH', 'ffmpeg');
 } else {
-  add('bad', 'FFmpeg tidak ditemukan', 'jalankan: npm install ffmpeg-static');
+  add('bad', 'FFmpeg tidak ditemukan', 'jalankan: npm run install:ffmpeg');
 }
 
 // yt-dlp
@@ -66,15 +65,22 @@ else add('warn', 'Spotify credentials kosong', 'masih jalan via halaman embed (m
 
 // Opus
 try {
-  await import('@discordjs/opus');
-  add('ok', 'Opus encoder native', '@discordjs/opus');
+  await import('opusscript');
+  add('ok', 'Opus encoder (opusscript)', 'pure JS, tidak butuh native build / node-gyp');
 } catch {
-  try {
-    await import('opusscript');
-    add('warn', 'Pakai opusscript (pure JS)', 'lebih berat CPU, tapi tetap jalan');
-  } catch {
-    add('bad', 'Tidak ada opus encoder', 'npm install opusscript');
-  }
+  add('bad', 'Tidak ada opus encoder', 'npm install opusscript');
+}
+
+// Whitelist
+if (config.whitelist.enabled) {
+  const fromEnv = config.whitelist.guildIds.length;
+  add(
+    fromEnv ? 'ok' : 'warn',
+    `Whitelist lisensi AKTIF (${fromEnv} dari .env)`,
+    fromEnv ? 'server lain akan ditolak' : 'daftar kosong = mode terbuka, isi WHITELIST_GUILD_IDS',
+  );
+} else {
+  add('warn', 'Whitelist lisensi mati', 'WHITELIST_ENABLED=false - semua server bebas memakai bot');
 }
 
 // data dir

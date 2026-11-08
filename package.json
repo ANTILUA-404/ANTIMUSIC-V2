@@ -15,7 +15,9 @@
     "doctor": "node scripts/doctor.js",
     "check": "node scripts/check.js",
     "audio-test": "node scripts/audio-test.js",
+    "install:ffmpeg": "node scripts/install-ffmpeg.js",
     "install:ytdlp": "node scripts/install-ytdlp.js",
+    "postinstall": "node scripts/postinstall.js",
     "test": "node --test test/core.test.js"
   },
   "keywords": [
@@ -32,10 +34,6 @@
     "@discordjs/voice": "^0.19.2",
     "discord.js": "^14.28.1",
     "dotenv": "^18.0.9",
-    "ffmpeg-static": "^5.3.0",
     "opusscript": "^0.1.1"
-  },
-  "optionalDependencies": {
-    "@discordjs/opus": "^0.10.0"
   }
 }

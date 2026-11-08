@@ -75,7 +75,7 @@ dan naik ke ±200–300 MB saat memutar audio di beberapa server.
 ├── src/
 ├── scripts/
 ├── test/
-├── bin/            (yt-dlp otomatis masuk sini)
+├── bin/            (ffmpeg + yt-dlp otomatis masuk sini)
 └── data/
 ```
 
@@ -135,22 +135,57 @@ GET http://127.0.0.1:SERVER_PORT/health
 
 ---
 
-## 6. yt-dlp otomatis
+## 6. FFmpeg & yt-dlp otomatis
 
-Container panel biasanya tidak punya `yt-dlp` dan kamu tidak bisa `apt-get`.
-Karena itu bot **mengunduh sendiri** binary-nya ke `bin/yt-dlp` saat start pertama
-(`YTDLP_AUTO_INSTALL=true`, default).
+Container panel biasanya tidak punya `ffmpeg` maupun `yt-dlp`, dan kamu tidak bisa `apt-get`.
+Karena itu bot **mengunduh sendiri** kedua binary ke `bin/`:
+
+| Binary | Ukuran | Dipakai untuk |
+|---|---|---|
+| `bin/ffmpeg` | ±28 MB | decode audio ke PCM 48kHz |
+| `bin/yt-dlp` | ±30 MB | ambil stream dari YouTube/SoundCloud/dll |
+
+Urutan pencarian: `FFMPEG_PATH`/`YTDLP_PATH` di `.env` → `bin/` → `PATH`.
+Unduhan terjadi otomatis saat `npm install` (postinstall) dan diulang saat bot start
+kalau binary-nya belum ada.
+
+### Kalau console menampilkan `ffmpeg: spawn ... ENOENT`
+
+Itu artinya binary FFmpeg belum ada. Penyebab paling umum: **npm 11.7+ memblokir
+lifecycle script dependency** dan menulis begini saat install:
+
+```
+npm warn allow-scripts 2 packages have install scripts not yet covered by allowScripts:
+npm warn allow-scripts   ffmpeg-static@5.3.0 (install: node install.js)
+```
+
+Versi ini **tidak lagi bergantung** pada install script itu (dependency `ffmpeg-static`
+sudah dihapus), jadi cukup:
+
+```bash
+npm run install:ffmpeg
+npm run install:ytdlp
+```
+
+lalu restart server. Atau langsung restart saja — bot akan mengunduh sendiri saat boot.
+
+Kalau kamu masih memakai versi lama yang punya `ffmpeg-static`, perbaikannya:
+
+```bash
+npm rebuild ffmpeg-static        # jalankan ulang install script-nya
+# atau
+npm approve-scripts ffmpeg-static
+```
 
 Update manual kalau YouTube berubah:
 
 ```bash
 npm run install:ytdlp -- --force
+npm run install:ffmpeg -- --force
 ```
 
-Lalu restart server dari panel.
-
-> Ukuran binary ±30 MB. Pastikan disk tidak penuh, kalau tidak unduhan gagal
-> dan bot menolak memutar audio (error jelas di console).
+> Pastikan disk tidak penuh, kalau tidak unduhan gagal dan bot menolak memutar audio
+> (error-nya jelas di console).
 
 ---
 
@@ -209,6 +244,7 @@ npm run audio-test   # bukti pipeline audio benar-benar keluar PCM
 | `Cannot find module 'discord.js'` | `npm install` belum jalan |
 | Bot online, command tidak muncul | `npm run deploy` lalu restart |
 | `yt-dlp tidak ditemukan` | `npm run install:ytdlp` (cek disk tidak penuh) |
+| `ffmpeg ... ENOENT` | `npm run install:ffmpeg`, lalu restart |
 | Audio putus-putus | CPU/RAM kurang, atau jaringan VPS lambat. Coba `LOG_LEVEL=debug` |
 | Panel restart terus | Health endpoint gagal bind → pastikan `HEALTH_PORT` kosong |
 | `Sign in to confirm you're not a bot` | IP VPS diblokir YouTube → isi `YTDLP_COOKIES` (cookies.txt akun burner) |
