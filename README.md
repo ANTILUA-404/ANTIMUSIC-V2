@@ -8,6 +8,9 @@ bot otomatis turun ke engine lokal.
 Mode **24/7 radio**, **whitelist lisensi server**, **health endpoint untuk panel**, dan
 dukungan **YouTube / Spotify / SoundCloud / Bandcamp / Twitch / Vimeo / link stream langsung**.
 
+> 🆕 **Baru pertama kali?** Ikuti **[TUTORIAL.md](TUTORIAL.md)** — panduan langkah demi langkah
+> dari bikin bot di Discord, deploy Lavalink di Railway, sampai bot bunyi di voice channel.
+
 ---
 
 ## Dua engine audio
