@@ -87,12 +87,13 @@ Jadi yang perlu kamu lakukan cuma **satu**: memberi token.
 
 ### Paling cepat — import egg Pterodactyl
 
-> **Pelanggan hosting panel** (anjas.id, dsb.) tidak bisa import egg — itu normal.
-> Langkah khusus untuk kalian ada di [PTERODACTYL.md bagian 🏠](PTERODACTYL.md).
+> **Pelanggan hosting panel** (anjas.id, dsb.) tidak bisa import egg, dan Startup Command
+> biasanya terkunci — itu normal, **tidak perlu diubah**. Cukup taruh  di root lewat
+> File Manager. Langkahnya ada di [PTERODACTYL.md bagian 🏠](PTERODACTYL.md).
 
 1. Admin panel → **Nests** → **Import Egg** → pilih `deploy/pterodactyl-egg.json`
 2. **Create Server** pakai egg `ANTIMUSIC v3`
-3. Isi **Discord Bot Token** di tab Startup
+3. Isi **Discord Bot Token** (tab Startup, atau File Manager → )
 4. **Start**
 
 Installer otomatis clone repo, `npm install`, dan mengunduh FFmpeg + yt-dlp.

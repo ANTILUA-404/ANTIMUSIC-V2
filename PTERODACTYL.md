@@ -28,15 +28,14 @@ Kabar baiknya: untuk kasus ini kamu memang tidak butuh egg. Bot mengurus dirinya
 
 ### Langkahnya
 
-1. **Tab Startup** — pastikan nilainya:
+> **Startup Command tidak perlu diubah.** Kalau panel mengunci field itu (umum di
+> hosting panel seperti anjas.id), biarkan apa adanya. Repo ini jalan dengan
+> `node index.js`, `node start.js`, maupun `npm start` — dan kalau egg-nya tidak
+> menjalankan `npm install`, `index.js` menjalankannya sendiri.
+>
+> Semua konfigurasi lewat **`.env`** di File Manager. Tidak ada yang wajib di tab Startup.
 
-   | Variabel | Nilai | Kenapa |
-   |---|---|---|
-   | `MAIN_FILE` | `index.js` | entrypoint repo ini |
-   | `AUTO_UPDATE` | `1` | `git pull` tiap start (kalau project dari git) |
-   | Node image | Node.js 20 / 22 | minimal Node 20 |
-
-2. **Tab Files** — pastikan project ada di **root** container, bukan di subfolder:
+1. **Tab Files** — project harus ada di **root** container, bukan di subfolder:
 
    ```
    /home/container/index.js
@@ -44,32 +43,51 @@ Kabar baiknya: untuk kasus ini kamu memang tidak butuh egg. Bot mengurus dirinya
    /home/container/src/
    ```
 
-   Kalau hasil unzip masuk ke `antimusic/antimusic/...`, pindahkan isinya ke root.
+   Kalau hasil unzip masuk ke `antimusic/antimusic/...`, pindahkan isinya ke root
+   (File Manager: pilih semua isi subfolder → Move → `/`).
 
-3. **Isi token** — tab Startup → `DISCORD_TOKEN`, atau tab Files → buat `.env`:
+2. **Buat `.env`** di root — File Manager → **New File** → nama `.env` → isi:
 
    ```env
    DISCORD_TOKEN=token_kamu
    ```
 
-4. **Tekan Start.** Console akan menampilkan urutan ini:
+   Hanya itu yang wajib. Opsional (semua bisa ditambah nanti):
+
+   ```env
+   WHITELIST_ENABLED=true
+   WHITELIST_GUILD_IDS=123456789012345678
+   AUDIO_ENGINE=auto
+   LAVALINK_HOST=xxx.up.railway.app
+   ```
+
+   > `.env` selalu dibaca dari **root project**, bukan dari working directory.
+   > Jadi tidak masalah kalau panel menjalankan proses dari direktori lain.
+
+3. **Restart.** Console akan menampilkan urutan ini:
 
    ```
+   INFO [main] Konfigurasi: /home/container/.env
    [bootstrap] node_modules belum ada — menjalankan npm install...
    INFO [ffmpeg] FFmpeg siap dipakai: /home/container/bin/ffmpeg
    INFO [yt-dlp] yt-dlp siap dipakai: /home/container/bin/yt-dlp
-   INFO [ready] Login sebagai ANTIMUSIC#7110 • 2 server • 18 command
-   INFO [commands] 18 slash command didaftarkan → guild 123... (instan)
+   INFO [ready] Login sebagai ANTIMUSIC#7110 • 2 server • 19 command
+   INFO [commands] 19 slash command didaftarkan → guild 123... (instan)
    ```
 
    Slash command langsung muncul di Discord — tidak perlu `npm run deploy`.
 
+Kalau baris pertama bilang `Konfigurasi: tidak ada .env`, berarti file-nya belum
+terbaca: cek namanya benar-benar `.env` (bukan `.env.txt`) dan letaknya di root,
+sejajar `index.js`.
+
 ### Catatan khusus panel hosting
+
 
 | Hal | Penjelasan |
 |---|---|
 | **Jangan isi `HEALTH_PORT`** | Panel sudah menyuntikkan `SERVER_PORT`; kalau diisi bisa bentrok dan server dianggap mati |
-| **Console error `ts-node`** | Egg generik mendeteksi `MAIN_FILE` dengan pola `"*.js"` yang bisa salah. Set `MAIN_FILE=index.js`. Repo ini sudah menyertakan `tsconfig.json` + entrypoint tanpa top-level await supaya jalur ts-node tetap jalan |
+| **Console error `ts-node`** | Egg generik mendeteksi `MAIN_FILE` dengan pola `"*.js"` yang bisa salah. **Tidak perlu diapa-apakan**: repo ini sudah membawa `tsconfig.json` + entrypoint tanpa top-level await, jadi jalur ts-node tetap jalan |
 | **Update bot** | Kalau project dari git: `AUTO_UPDATE=1` lalu restart. Kalau upload ZIP: upload ulang, **jangan** hapus `data/` dan `.env` |
 | **Kuota disk** | FFmpeg ±28 MB + yt-dlp ±30 MB + `node_modules` ±80 MB |
 | **`npm run deploy`** | Tidak perlu — didaftarkan otomatis setiap start |

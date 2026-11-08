@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +7,22 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** Absolute path to the project root. */
 export const ROOT = path.resolve(__dirname, '..');
+
+/**
+ * `.env` SELALU dibaca dari root project, bukan dari current working directory.
+ *
+ * Panel (Pterodactyl, dsb.) kadang menjalankan `node /home/container/index.js`
+ * dari direktori lain, sehingga `dotenv/config` biasa akan melewatkan .env dan
+ * bot mati dengan "DISCORD_TOKEN kosong" padahal file-nya ada.
+ *
+ * dotenv TIDAK menimpa env yang sudah ada, jadi variabel dari tab Startup panel
+ * tetap menang.
+ */
+const ENV_FILE = path.join(ROOT, '.env');
+const envLoaded = fs.existsSync(ENV_FILE);
+if (envLoaded) dotenv.config({ path: ENV_FILE, quiet: true });
+
+export const envFile = envLoaded ? ENV_FILE : null;
 
 const toNumber = (value, fallback) => {
   const parsed = Number(value);

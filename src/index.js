@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { config, ROOT } from './config.js';
+import { config, envFile, ROOT } from './config.js';
 import { startHealthServer } from './health.js';
 import { loadCommands, loadEvents } from './loaders.js';
 import { MusicClient } from './structures/MusicClient.js';
@@ -17,6 +17,7 @@ async function main() {
   await loadEvents(client);
 
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  log.info(envFile ? `Konfigurasi: ${envFile}` : 'Konfigurasi: tidak ada .env, memakai env panel.');
 
   if (DRY_RUN) {
     log.info('Dry-run: command & event berhasil dimuat, skip login.');
@@ -29,7 +30,9 @@ async function main() {
   }
 
   if (!config.token) {
-    log.error('DISCORD_TOKEN kosong. Copy .env.example jadi .env lalu isi token-nya.');
+    log.error('DISCORD_TOKEN kosong.');
+    log.error('Di panel: File Manager -> buat file .env di root server -> isi DISCORD_TOKEN=token_kamu');
+    log.error('Tidak perlu mengubah Startup Command.');
     process.exit(1);
   }
 
