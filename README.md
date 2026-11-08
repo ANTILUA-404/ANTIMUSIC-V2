@@ -239,10 +239,12 @@ Bot memakai *Client Credentials flow* (metadata publik saja, tanpa login user).
 | `WHITELIST_LEAVE_UNAUTHORIZED` | `true` | Keluar dari server tanpa lisensi |
 | `AUDIO_ENGINE` | `auto` | `auto`/`lavalink`/`local` |
 | `AUDIO_FALLBACK_LOCAL` | `true` | Turun ke lokal kalau Lavalink mati |
-| `LAVALINK_HOST` | — | Domain node (kosong = engine lokal) |
-| `LAVALINK_PORT` | `443` | Port node |
+| `LAVALINK_HOST` | — | Host node (kosong = engine lokal). `*.railway.internal` → http, domain → https |
+| `LAVALINK_URL` | — | Alternatif satu URL penuh, menang atas HOST/PORT/SECURE |
+| `LAVALINK_PORT` | otomatis | `8080` internal Railway, `443` domain publik, `2333` VPS |
 | `LAVALINK_PASSWORD` | — | Password node |
-| `LAVALINK_SECURE` | `true` | TLS (wajib untuk Railway) |
+| `LAVALINK_SECURE` | otomatis | TLS; kosongkan untuk auto, isi untuk memaksa |
+| `LAVALINK_STARTUP_WAIT_MS` | `90000` | Tunggu `/v4/info` hidup sebelum fallback ke lokal |
 | `LAVALINK_SEARCH_SOURCE` | `youtube` | `youtube`/`ytmsearch`/`soundcloud` |
 | `LOG_LEVEL` | `info` | `error`/`warn`/`info`/`debug` |
 

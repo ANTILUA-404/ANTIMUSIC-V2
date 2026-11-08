@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { config, ROOT } from '../src/config.js';
+import { baseUrl } from '../src/audio/lavalink-node.js';
 
 const lines = [];
 const add = (status, label, detail = '') => lines.push({ status, label, detail });
@@ -70,7 +71,7 @@ if (config.audio.engine === 'local') {
 } else if (!lavalink.enabled) {
   add('ok', 'Audio engine: lokal', 'LAVALINK_HOST kosong -> engine lokal');
 } else {
-  const nodes = lavalink.nodes.map((node) => `${node.host}:${node.port}${node.secure ? ' (TLS)' : ''}`).join(', ');
+  const nodes = lavalink.nodes.map((node) => baseUrl(node)).join(', ');
   add('ok', `Audio engine: ${config.audio.engine}`, `node: ${nodes}`);
   if (config.audio.fallbackLocal) add('ok', 'Fallback lokal aktif', 'kalau Lavalink mati, bot tetap bunyi');
   else add('warn', 'Fallback lokal MATI', 'bot berhenti kalau Lavalink tidak tersedia');

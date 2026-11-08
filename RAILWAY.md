@@ -44,7 +44,26 @@ Started Launcher in 15.6 seconds
 
 ## 2. Sambungkan bot ke Lavalink
 
-Di `.env` bot (atau tab Startup panel):
+Ada dua jalur. Pilih **salah satu**, jangan dicampur.
+
+### 2a. Private networking (disarankan kalau bot juga di Railway)
+
+Bot dan Lavalink di project yang sama? Lewat jalur internal saja: tanpa TLS,
+tanpa kuota egress, dan tidak lewat proxy publik Railway.
+
+```env
+AUDIO_ENGINE=auto
+AUDIO_FALLBACK_LOCAL=true
+
+LAVALINK_HOST=lavalink.railway.internal   # <nama-service>.railway.internal
+LAVALINK_PORT=8080                        # $PORT service Lavalink
+LAVALINK_PASSWORD=password-yang-tadi
+```
+
+`<nama-service>` = nama service Lavalink di dashboard Railway (bukan nama project).
+`LAVALINK_PORT` harus sama dengan `$PORT` service itu — cek tab **Variables**.
+
+### 2b. Domain publik (kalau bot di luar Railway / Pterodactyl)
 
 ```env
 AUDIO_ENGINE=auto
@@ -56,18 +75,24 @@ LAVALINK_PASSWORD=password-yang-tadi
 LAVALINK_SECURE=true
 ```
 
+> **Skema sekarang ditebak otomatis** dari host: `*.railway.internal` → `http`,
+> `*.up.railway.app` → `https:443`. Jadi `LAVALINK_SECURE`/`LAVALINK_PORT` boleh
+> dikosongkan; kalau diisi, nilainya tetap menang (kecuali kombinasi yang mustahil,
+> mis. domain publik + port 2333 — itu dikoreksi dan diberi warning di log).
+>
+> `LAVALINK_PORT=2333` **hanya** untuk VPS yang port-nya dibuka langsung
+> (`LAVALINK_SECURE=false`). Itu port internal container Railway, tidak terbuka ke luar.
+
 Restart bot. Di console akan muncul:
 
 ```
-INFO [engine:lavalink] node "main" tersambung (antimusic-production-xxxx.up.railway.app:443)
-INFO [engine:lavalink] Lavalink siap: main@antimusic-production-xxxx.up.railway.app:443
-INFO [client] Engine audio aktif: lavalink (main@...:443)
+INFO [engine:lavalink] node "main" siap: http://lavalink.railway.internal:8080 (Lavalink 4.2.2)
+INFO [engine:lavalink] node "main" tersambung (lavalink.railway.internal:8080)
+INFO [engine:lavalink] Lavalink siap: main@lavalink.railway.internal:8080
+INFO [client] Engine audio aktif: lavalink (main@lavalink.railway.internal:8080)
 ```
 
 Cek dari Discord dengan `/engine status`.
-
-> **Port 443 + secure=true** karena Railway mengekspos domain lewat HTTPS.
-> Jangan pakai `2333` — itu port internal container, tidak terbuka ke luar.
 
 ---
 
@@ -116,6 +141,14 @@ source itu. Karena itu `railway/start.sh` hanya menulis `spotify: true` kalau
 | `YOUTUBE_OAUTH_ENABLED` | `false` | `true` kalau IP Railway diblokir YouTube |
 | `YOUTUBE_OAUTH_REFRESH_TOKEN` | — | Token dari OAuth device flow (akun burner) |
 
+Tuning di sisi **bot** (bukan service Lavalink):
+
+| Variable (bot) | Default | Efek |
+|---|---|---|
+| `LAVALINK_STARTUP_WAIT_MS` | `90000` | Berapa lama bot menunggu `/v4/info` hidup sebelum pindah ke engine lokal. Naikkan kalau deploy pertama Lavalink lambat (unduh plugin) |
+| `LAVALINK_CONNECT_TIMEOUT_MS` | `20000` | Batas waktu `manager.init()` + menunggu node connected setelah preflight lolos |
+| `LAVALINK_SECURE` / `LAVALINK_PORT` | otomatis | Kosongkan biar ditebak dari host; isi hanya kalau mau memaksa |
+
 Kalau muncul `All clients failed to load the item` / `Video requires login`,
 IP Railway kamu kena pembatasan YouTube. Solusi: aktifkan OAuth (akun burner) atau
 turunkan ke `AUDIO_ENGINE=local` yang memakai yt-dlp (lebih tahan pemblokiran IP).
@@ -126,7 +159,9 @@ turunkan ke `AUDIO_ENGINE=local` yang memakai yt-dlp (lebih tahan pemblokiran IP
 
 | Gejala | Penyebab & solusi |
 |---|---|
-| Bot: `Lavalink tidak bisa dihubungi dalam 20s` | Node belum siap / password salah. Cek log Railway, pastikan `LAVALINK_PASSWORD` sama persis |
+| `SyntaxError: Unexpected token 'P', "Proxy erro"... is not valid JSON` | Bot menembak URL yang salah: proxy host yang menjawab, bukan Lavalink. Biasanya `LAVALINK_HOST` internal tapi `secure=true`, atau domain publik dengan `LAVALINK_PORT=2333`. Versi ini sudah menormalkan skema/port otomatis dan melaporkannya sebagai `proxy: ... membalas non-JSON`. Perbaiki host/port sesuai bagian 2 |
+| Log `Lavalink belum siap (12s/90s) ...` berulang | Normal saat cold start: bot menunggu `/v4/info` hidup. Kalau mentok sampai timeout, cek detail per node di baris terakhir error |
+| Bot: `Lavalink tidak siap dalam 90s` | Node belum siap / password salah / port beda. Cek log Railway, pastikan `LAVALINK_PASSWORD` sama persis dan `LAVALINK_PORT` = `$PORT` service Lavalink |
 | `401 Unauthorized` di log Lavalink | Password di bot ≠ password di Railway |
 | Railway: healthcheck gagal | Boot pertama lambat (unduh plugin). Tunggu / naikkan `healthcheckTimeout` |
 | Railway: `Port already in use` | Seharusnya tidak terjadi — `start.sh` membuang `SERVER_PORT` dan memaksa `-Dserver.port` |

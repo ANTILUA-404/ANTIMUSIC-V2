@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { normalizeNode } from './audio/lavalink-node.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -79,41 +80,50 @@ function idleLeaveSeconds() {
 /**
  * Node Lavalink (mis. Railway). Kosong = engine lokal (yt-dlp + FFmpeg).
  * `LAVALINK_NODES` (JSON array) menang atas variabel tunggal, berguna untuk failover.
+ *
+ * Skema + port diturunkan di `normalizeNode()` (lihat audio/lavalink-node.js):
+ * host internal Railway otomatis http, domain publik otomatis https/443. Jadi
+ * `LAVALINK_SECURE` boleh dikosongkan dan tidak ada lagi salah tebak yang
+ * berujung "Proxy error" + `SyntaxError: Unexpected token 'P'`.
  */
 function lavalinkNodes() {
+  const retryAmount = toNumber(process.env.LAVALINK_RETRY_AMOUNT, 10);
+  const retryDelay = toNumber(process.env.LAVALINK_RETRY_DELAY_MS, 5000);
+
+  const build = (input) => {
+    const { node, notes } = normalizeNode({ retryAmount, retryDelay, ...input }, process.env);
+    for (const note of notes) console.warn(`[config] node "${node.id}": ${note}`);
+    return node;
+  };
+
   const raw = process.env.LAVALINK_NODES?.trim();
   if (raw) {
     try {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length) {
-        return parsed.map((node, index) => ({
-          id: String(node.id ?? `node-${index + 1}`),
-          host: String(node.host),
-          port: toNumber(node.port, 443),
-          authorization: String(node.password ?? node.authorization ?? ''),
-          secure: node.secure !== false,
-          retryAmount: toNumber(process.env.LAVALINK_RETRY_AMOUNT, 10),
-          retryDelay: toNumber(process.env.LAVALINK_RETRY_DELAY_MS, 5000),
-        }));
+        return parsed.map((node, index) =>
+          build({ ...node, id: String(node.id ?? `node-${index + 1}`) }),
+        );
       }
     } catch (error) {
       console.warn('[config] LAVALINK_NODES bukan JSON valid, diabaikan');
     }
   }
 
-  const host = process.env.LAVALINK_HOST?.trim();
-  if (!host) return [];
+  const target = process.env.LAVALINK_URL?.trim() || process.env.LAVALINK_HOST?.trim();
+  if (!target) return [];
+
+  const secureEnv = process.env.LAVALINK_SECURE?.trim();
 
   return [
-    {
+    build({
       id: process.env.LAVALINK_NODE_ID?.trim() || 'main',
-      host,
-      port: toNumber(process.env.LAVALINK_PORT, 443),
-      authorization: process.env.LAVALINK_PASSWORD?.trim() || '',
-      secure: toBool(process.env.LAVALINK_SECURE, true),
-      retryAmount: toNumber(process.env.LAVALINK_RETRY_AMOUNT, 10),
-      retryDelay: toNumber(process.env.LAVALINK_RETRY_DELAY_MS, 5000),
-    },
+      url: target,
+      // undefined = biar normalizeNode yang menebak dari host/port.
+      port: process.env.LAVALINK_PORT?.trim() || undefined,
+      secure: secureEnv ? toBool(secureEnv, undefined) : undefined,
+      password: process.env.LAVALINK_PASSWORD?.trim() || '',
+    }),
   ];
 }
 
@@ -191,6 +201,8 @@ export const config = {
       enabled: LAVALINK_NODES.length > 0,
       nodes: LAVALINK_NODES,
       searchSource: process.env.LAVALINK_SEARCH_SOURCE?.trim() || 'youtube',
+      /** Tunggu node benar-benar menjawab /v4/info sebelum menyerah ke engine lokal. */
+      startupWaitMs: toNumber(process.env.LAVALINK_STARTUP_WAIT_MS, 90_000),
       connectTimeoutMs: toNumber(process.env.LAVALINK_CONNECT_TIMEOUT_MS, 20_000),
     },
   },

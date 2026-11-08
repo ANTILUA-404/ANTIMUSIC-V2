@@ -14,6 +14,7 @@ import { parseTimeInput } from '../src/utils/guards.js';
 import { FILTERS } from '../src/audio/filters.js';
 import { stationToTrack } from '../src/structures/RadioStore.js';
 import { Track } from '../src/structures/Track.js';
+import { baseUrl, normalizeNode, probeLavalink } from '../src/audio/lavalink-node.js';
 
 test('formatDuration', () => {
   assert.equal(formatDuration(0), '0:00');
@@ -234,4 +235,128 @@ test('GuildPlayer mengelola antrian di atas engine abstrak', async () => {
   assert.equal(player.current, null, 'antrian habis setelah skip');
 
   await player.destroy();
+});
+
+/* ------------------------- Lavalink node normalisasi ------------------------ */
+
+test('normalizeNode: domain publik tanpa port -> https:443', () => {
+  const { node, notes } = normalizeNode({ id: 'main', host: 'lavalink.example.com' });
+  assert.equal(node.host, 'lavalink.example.com');
+  assert.equal(node.port, 443);
+  assert.equal(node.secure, true);
+  assert.equal(baseUrl(node), 'https://lavalink.example.com');
+  assert.deepEqual(notes, []);
+});
+
+test('normalizeNode: host internal Railway -> http:8080 (tanpa TLS)', () => {
+  const { node } = normalizeNode({ id: 'main', host: 'lavalink.railway.internal' });
+  assert.equal(node.secure, false);
+  assert.equal(node.port, 8080);
+  assert.equal(baseUrl(node), 'http://lavalink.railway.internal:8080');
+});
+
+test('normalizeNode: host internal + LAVALINK_SECURE=true dikoreksi jadi http', () => {
+  const { node, notes } = normalizeNode({ host: 'lavalink.railway.internal', secure: true });
+  assert.equal(node.secure, false);
+  assert.equal(notes.length, 1);
+});
+
+test('normalizeNode: URL penuh menang atas host/port', () => {
+  const { node } = normalizeNode({ url: 'http://lavalink.railway.internal:9000', port: 443, secure: true });
+  assert.equal(node.port, 9000);
+  assert.equal(node.secure, false);
+});
+
+test('normalizeNode: domain publik Railway dipaksa 443 walau port 2333', () => {
+  const { node, notes } = normalizeNode({ host: 'antimusic-production-xxxx.up.railway.app', port: 2333 });
+  assert.equal(node.port, 443);
+  assert.equal(node.secure, true);
+  assert.ok(notes.some((note) => note.includes('443')));
+});
+
+test('normalizeNode: IP polos -> http:2333, password masuk authorization', () => {
+  const { node } = normalizeNode({ host: '10.0.0.5', password: 'rahasia' });
+  assert.equal(node.secure, false);
+  assert.equal(node.port, 2333);
+  assert.equal(node.authorization, 'rahasia');
+  assert.equal(baseUrl(node), 'http://10.0.0.5:2333');
+});
+
+test('normalizeNode: host:port tanpa skema diparse', () => {
+  const { node } = normalizeNode({ host: '127.0.0.1:2333' });
+  assert.equal(node.host, '127.0.0.1');
+  assert.equal(node.port, 2333);
+  assert.equal(node.secure, false);
+});
+
+/* ----------------------------- preflight /v4/info --------------------------- */
+
+async function withServer(handler, run) {
+  const { createServer } = await import('node:http');
+  const server = createServer(handler);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  try {
+    return await run(port);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+test('probeLavalink: balasan /v4/info valid dianggap siap', async () => {
+  await withServer(
+    (req, res) => {
+      assert.equal(req.url, '/v4/info');
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ version: { semver: '4.2.2', major: 4 }, sourceManagers: [] }));
+    },
+    async (port) => {
+      const { node } = normalizeNode({ host: `127.0.0.1:${port}` });
+      const { info, url } = await probeLavalink(node, { timeoutMs: 2000 });
+      assert.equal(info.version.semver, '4.2.2');
+      assert.equal(url, `http://127.0.0.1:${port}/v4/info`);
+    },
+  );
+});
+
+test('probeLavalink: "Proxy error" diklasifikasi proxy, bukan SyntaxError', async () => {
+  await withServer(
+    (req, res) => {
+      res.writeHead(502, { 'content-type': 'text/plain' });
+      res.end('Proxy error: upstream tidak menjawab');
+    },
+    async (port) => {
+      const { node } = normalizeNode({ host: `127.0.0.1:${port}` });
+      await assert.rejects(
+        () => probeLavalink(node, { timeoutMs: 2000 }),
+        (error) => {
+          assert.equal(error.name, 'LavalinkProbeError');
+          assert.equal(error.kind, 'proxy');
+          assert.match(error.message, /Proxy error/);
+          assert.ok(error.hint.includes('proxy'));
+          return true;
+        },
+      );
+    },
+  );
+});
+
+test('probeLavalink: 401 jadi kind auth dengan hint password', async () => {
+  await withServer(
+    (req, res) => {
+      res.writeHead(401, { 'content-type': 'text/plain' });
+      res.end('Unauthorized');
+    },
+    async (port) => {
+      const { node } = normalizeNode({ host: `127.0.0.1:${port}` });
+      await assert.rejects(
+        () => probeLavalink(node, { timeoutMs: 2000 }),
+        (error) => {
+          assert.equal(error.kind, 'auth');
+          assert.match(error.hint, /LAVALINK_PASSWORD/);
+          return true;
+        },
+      );
+    },
+  );
 });

@@ -3,8 +3,19 @@ import { LavalinkManager } from 'lavalink-client';
 import { config } from '../config.js';
 import { createLogger } from '../utils/logger.js';
 import { FILTERS } from './filters.js';
+import { waitForLavalink } from './lavalink-node.js';
 
 const log = createLogger('engine:lavalink');
+
+/** Batasi promise yang bisa menggantung (mis. manager.init() saat node belum siap). */
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} tidak selesai dalam ${Math.round(ms / 1000)}s`)), ms);
+    timer.unref?.();
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 /**
  * Engine Lavalink (node eksternal, mis. Railway).
@@ -32,7 +43,14 @@ export class LavalinkEngine extends EventEmitter {
   /* --------------------------------- setup -------------------------------- */
 
   async init() {
-    const { nodes, searchSource, connectTimeoutMs } = config.audio.lavalink;
+    const { nodes, searchSource, connectTimeoutMs, startupWaitMs } = config.audio.lavalink;
+
+    // 1. Preflight HTTP. Node yang belum boot (Railway cold start 30-120s) TIDAK
+    //    boleh langsung diserahkan ke lavalink-client: `manager.init()` bisa
+    //    menggantung karena retry internalnya, lalu fallback lokal tidak jalan.
+    //    Di sini kita juga menangkap balasan non-JSON ("Proxy error") dengan
+    //    pesan yang jelas, bukan `SyntaxError: Unexpected token 'P'`.
+    await waitForLavalink(nodes, { timeoutMs: startupWaitMs, log });
 
     this.manager = new LavalinkManager({
       nodes,
@@ -52,7 +70,19 @@ export class LavalinkEngine extends EventEmitter {
     });
 
     this.#bindEvents();
-    await this.manager.init({ id: this.client.user.id, username: this.client.user.username });
+
+    try {
+      await withTimeout(
+        this.manager.init({ id: this.client.user.id, username: this.client.user.username }),
+        connectTimeoutMs,
+        'LavalinkManager.init',
+      );
+    } catch (error) {
+      // Jangan tinggalkan retry internal library jalan di belakang layar.
+      await this.dispose().catch(() => {});
+      throw error;
+    }
+
     await this.#waitForNode(connectTimeoutMs);
 
     this.ready = true;
@@ -62,10 +92,17 @@ export class LavalinkEngine extends EventEmitter {
 
   #bindEvents() {
     const manager = this.manager;
+    const lastErrorAt = new Map();
 
     manager.nodeManager.on('connect', (node) => log.info(`node "${node.id}" tersambung (${node.options.host}:${node.options.port})`));
     manager.nodeManager.on('disconnect', (node, reason) => log.warn(`node "${node.id}" terputus: ${reason ?? 'unknown'}`));
-    manager.nodeManager.on('error', (node, error) => log.error(`node "${node.id}" error: ${error?.message ?? error}`));
+    manager.nodeManager.on('error', (node, error) => {
+      // Satu error per 15 detik per node: cukup untuk diagnosa, tidak membanjiri log.
+      const now = Date.now();
+      if (now - (lastErrorAt.get(node.id) ?? 0) < 15_000) return;
+      lastErrorAt.set(node.id, now);
+      log.warn(`node "${node.id}" error: ${error?.message ?? error}`);
+    });
 
     manager.on('trackEnd', (player, track, payload) => {
       // 'replaced' = kita sendiri yang mengganti track -> jangan lanjut antrian.
@@ -102,7 +139,10 @@ export class LavalinkEngine extends EventEmitter {
     const reasons = nodes()
       .map((node) => `${node.id}: ${node.connected ? (node.info ? 'ok' : 'REST belum siap') : 'tidak tersambung'}`)
       .join(', ');
-    throw new Error(`Lavalink tidak bisa dihubungi dalam ${Math.round(timeoutMs / 1000)}s (${reasons || 'tidak ada node'})`);
+    throw new Error(
+      `node tidak siap dalam ${Math.round(timeoutMs / 1000)}s (${reasons || 'tidak ada node'}) — ` +
+        'cek LAVALINK_PASSWORD dan port; lihat log "Lavalink belum siap" di atas untuk detail',
+    );
   }
 
   #nodeSummary() {

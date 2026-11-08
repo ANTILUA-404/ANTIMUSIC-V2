@@ -40,6 +40,7 @@ export async function createEngine(client) {
     }
 
     log.warn('Turun ke engine lokal (yt-dlp + FFmpeg). Bot tetap bisa memutar audio.');
+    log.warn('Kalau Lavalink baru hidup belakangan, restart bot supaya pindah ke engine Lavalink.');
     await engine.dispose().catch(() => {});
     const fallback = new LocalEngine(client);
     await fallback.init();
