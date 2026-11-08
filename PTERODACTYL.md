@@ -15,6 +15,25 @@ Tidak ada Java, tidak ada JAR yang diunduh, tidak ada JVM yang dibunuh OS karena
 
 ---
 
+## ⚡ Cara tercepat: import egg (nol setup)
+
+1. Admin panel → **Nests** → **Import Egg** → pilih file `deploy/pterodactyl-egg.json`
+2. **Create Server** dengan egg **ANTIMUSIC v3**
+3. Buka tab **Startup** → isi **Discord Bot Token** (satu-satunya yang wajib)
+4. Tekan **Start**
+
+Installer akan clone repo, `npm install`, dan mengunduh FFmpeg + yt-dlp.
+Setiap restart berikutnya `git pull` otomatis (`AUTO_UPDATE=1`), dependency dan
+slash command juga diurus sendiri. **Tidak ada langkah manual lain.**
+
+Egg itu sudah mengisi semua variabel yang biasanya kamu setting manual
+(`AUTO_UPDATE`, `AUTO_DEPLOY_COMMANDS`, `DEFAULT_VOLUME`, whitelist, Spotify, dll).
+
+> Sudah punya server dan tidak mau bikin ulang? Langsung ke bagian
+> [3](#3-dependency--slash-command-otomatis) — semuanya sekarang otomatis.
+
+---
+
 ## 0. Upgrade dari v2 (Lavalink)
 
 Kalau server panel kamu masih berisi project v2:
@@ -83,22 +102,34 @@ Kalau hasil unzip masuk ke subfolder: `mv antimusic/* . && mv antimusic/.* .`
 
 ---
 
-## 3. Install dependency
+## 3. Dependency & slash command (otomatis)
 
-Buka **Console** panel, jalankan:
+**Tidak ada yang perlu dijalankan manual.** Cukup tekan **Start**:
 
-```bash
-npm install
-```
+| Yang dikerjakan bot | Kapan |
+|---|---|
+| `npm install` kalau `node_modules` belum ada | sebelum bot dimuat (`index.js`) |
+| Unduh FFmpeg + yt-dlp ke `bin/` | `postinstall`, dan diulang saat boot kalau hilang |
+| Daftarkan 18 slash command | saat ready, hanya kalau payload berubah |
+| Health endpoint di `SERVER_PORT` | saat boot |
 
-Kalau panel membatasi console, pakai tombol **Start** sekali — `index.js` akan gagal
-karena `node_modules` belum ada, lalu install manual lewat File Manager → terminal egg.
+Kalau egg kamu **sudah** menjalankan `npm install` di startup command (seperti egg
+Node.js standar), itu tidak masalah — hasilnya sama, cuma lebih cepat sedikit.
 
-Setelah itu daftarkan slash command (sekali saja, atau setiap kali command berubah):
+Kalau ingin memaksa daftar ulang slash command sekarang juga:
 
 ```bash
 npm run deploy
 ```
+
+Kalau ingin mematikan otomatisasi daftar command (misal mau kontrol manual):
+
+```env
+AUTO_DEPLOY_COMMANDS=false
+```
+
+> Slash command didaftarkan **per-guild** (instan, tidak perlu nunggu 1 jam).
+> Kalau bot belum ada di server mana pun, baru dipakai pendaftaran global.
 
 ---
 
@@ -115,9 +146,19 @@ Di tab **Startup**:
 Jangan pakai `npm start` di egg yang membungkus perintah dengan `sh -c` —
 kadang signal SIGTERM tidak diteruskan dan panel tidak bisa stop server dengan bersih.
 
+Egg bawaan repo (`deploy/pterodactyl-egg.json`) sudah memakai perintah ini plus
+`git pull` otomatis dan `npm install`:
+
+```bash
+if [[ -d .git ]] && [[ "{{AUTO_UPDATE}}" == "1" ]]; then git pull; fi; \
+if [[ -f /home/container/package.json ]]; then npm install --no-audit --no-fund; fi; \
+node /home/container/index.js
+```
+
 ---
 
 ## 5. Port & health check
+
 
 Panel menyuntikkan `SERVER_PORT` (port alokasi) ke container. Bot otomatis membuka
 HTTP health endpoint di port itu:

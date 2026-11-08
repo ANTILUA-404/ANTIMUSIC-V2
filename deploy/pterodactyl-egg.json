@@ -1,0 +1,185 @@
+{
+  "_comment": "ANTIMUSIC v3 — import lewat Admin > Nests > Import Egg. Setelah itu cukup isi DISCORD_TOKEN lalu Start.",
+  "meta": {
+    "version": "PTDL_v2",
+    "update_url": null
+  },
+  "exported_at": "2026-11-08T04:20:00+00:00",
+  "name": "ANTIMUSIC v3",
+  "author": "antilua404@users.noreply.github.com",
+  "description": "Discord music bot (Discord.js 14 + yt-dlp + FFmpeg). Tanpa Lavalink/Java. 24/7 radio, whitelist lisensi, slash command otomatis.",
+  "features": null,
+  "docker_images": {
+    "Node.js 22": "ghcr.io/parkervcp/yolks:nodejs_22",
+    "Node.js 20": "ghcr.io/parkervcp/yolks:nodejs_20"
+  },
+  "file_denylist": [],
+  "startup": "if [[ -d .git ]] && [[ \"{{AUTO_UPDATE}}\" == \"1\" ]]; then git pull; fi; if [[ -f /home/container/package.json ]]; then npm install --no-audit --no-fund; fi; node /home/container/index.js",
+  "config": {
+    "files": {},
+    "startup": {
+      "done": "INFO\\s+\\[ready\\] Login sebagai"
+    },
+    "logs": {},
+    "stop": "^C"
+  },
+  "scripts": {
+    "installation": {
+      "script": "#!/bin/bash\nset -e\ncd /mnt/server\n\necho '== ANTIMUSIC installer =='\napt-get update -y >/dev/null 2>&1 || true\napt-get install -y git >/dev/null 2>&1 || true\n\nif [ -d .git ]; then\n  echo 'Repo sudah ada, menarik versi terbaru...'\n  git fetch --all\n  git reset --hard origin/main\nelse\n  echo 'Mengunduh ANTIMUSIC...'\n  git clone --depth 1 https://github.com/ANTILUA-404/ANTIMUSIC-V2.git /tmp/antimusic-src\n  cp -r /tmp/antimusic-src/. /mnt/server/\n  rm -rf /tmp/antimusic-src\nfi\n\necho 'Memasang dependency (sekaligus mengunduh FFmpeg & yt-dlp)...'\nnpm install --no-audit --no-fund\n\necho ''\necho '== Selesai =='\necho 'Isi DISCORD_TOKEN di tab Startup, lalu tekan Start.'\necho 'Slash command didaftarkan otomatis, tidak perlu npm run deploy.'\n",
+      "container": "ghcr.io/parkervcp/installers:debian",
+      "entrypoint": "bash"
+    }
+  },
+  "variables": [
+    {
+      "name": "Discord Bot Token",
+      "description": "Token bot dari Discord Developer Portal > Bot > Reset Token. Ini satu-satunya yang wajib diisi.",
+      "env_variable": "DISCORD_TOKEN",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string",
+      "field_type": "text"
+    },
+    {
+      "name": "Application ID",
+      "description": "Opsional. Kosongkan saja — bot mengambil ID dari token.",
+      "env_variable": "CLIENT_ID",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|string",
+      "field_type": "text"
+    },
+    {
+      "name": "Guild ID (opsional)",
+      "description": "Isi ID server untuk daftar command khusus server itu saja.",
+      "env_variable": "GUILD_ID",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|string",
+      "field_type": "text"
+    },
+    {
+      "name": "Auto Update",
+      "description": "Tarik kode terbaru dari GitHub setiap start.",
+      "env_variable": "AUTO_UPDATE",
+      "default_value": "1",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|in:0,1",
+      "field_type": "text"
+    },
+    {
+      "name": "Auto Deploy Commands",
+      "description": "Daftarkan slash command otomatis saat start.",
+      "env_variable": "AUTO_DEPLOY_COMMANDS",
+      "default_value": "true",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|in:true,false",
+      "field_type": "text"
+    },
+    {
+      "name": "Node Packages",
+      "description": "Paket npm tambahan (pisahkan spasi). Kosongkan saja.",
+      "env_variable": "NODE_PACKAGES",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|string",
+      "field_type": "text"
+    },
+    {
+      "name": "Default Volume",
+      "description": "Volume awal 0-200.",
+      "env_variable": "DEFAULT_VOLUME",
+      "default_value": "80",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|integer|between:0,200",
+      "field_type": "text"
+    },
+    {
+      "name": "Idle Leave Seconds",
+      "description": "Keluar dari voice setelah sepi N detik. 0 = tidak pernah.",
+      "env_variable": "IDLE_LEAVE_SECONDS",
+      "default_value": "60",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|integer|min:0",
+      "field_type": "text"
+    },
+    {
+      "name": "Whitelist Enabled",
+      "description": "true = hanya server terdaftar yang boleh memakai bot.",
+      "env_variable": "WHITELIST_ENABLED",
+      "default_value": "false",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|in:true,false",
+      "field_type": "text"
+    },
+    {
+      "name": "Whitelist Guild IDs",
+      "description": "ID server yang berlisensi, pisahkan koma.",
+      "env_variable": "WHITELIST_GUILD_IDS",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|string",
+      "field_type": "text"
+    },
+    {
+      "name": "Owner Username",
+      "description": "Nama owner di panel penolakan lisensi.",
+      "env_variable": "OWNER_USERNAME",
+      "default_value": "owner",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|string",
+      "field_type": "text"
+    },
+    {
+      "name": "Owner User ID",
+      "description": "ID Discord owner untuk tombol Hubungi Owner.",
+      "env_variable": "OWNER_USER_ID",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|string",
+      "field_type": "text"
+    },
+    {
+      "name": "Spotify Client ID",
+      "description": "Opsional. Untuk playlist/album Spotify penuh.",
+      "env_variable": "SPOTIFY_CLIENT_ID",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|string",
+      "field_type": "text"
+    },
+    {
+      "name": "Spotify Client Secret",
+      "description": "Opsional.",
+      "env_variable": "SPOTIFY_CLIENT_SECRET",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|string",
+      "field_type": "password"
+    },
+    {
+      "name": "Log Level",
+      "description": "Tingkat detail log.",
+      "env_variable": "LOG_LEVEL",
+      "default_value": "info",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|in:error,warn,info,debug",
+      "field_type": "text"
+    }
+  ]
+}

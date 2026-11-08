@@ -1,5 +1,6 @@
 import { Events } from 'discord.js';
 import { config } from '../config.js';
+import { syncCommands } from '../utils/command-sync.js';
 import { createLogger } from '../utils/logger.js';
 import { denialPayload, whitelist } from '../whitelist.js';
 
@@ -8,9 +9,11 @@ const log = createLogger('guild-create');
 export default {
   name: Events.GuildCreate,
 
-  async execute(guild) {
+  async execute(guild, client) {
     if (whitelist.isAllowed(guild.id)) {
       log.info(`Bot ditambahkan ke server berlisensi: ${guild.name} (${guild.id})`);
+      // Daftarkan slash command khusus guild ini supaya langsung muncul (tanpa nunggu global).
+      await syncCommands(client, { guildIds: [guild.id] });
       return;
     }
 

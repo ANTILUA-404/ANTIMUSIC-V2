@@ -120,6 +120,11 @@ export const config = {
     restoreOnBoot: toBool(process.env.RADIO_RESTORE_ON_BOOT, true),
   },
 
+  /** Zero-setup: daftarkan slash command otomatis setiap start (kalau berubah). */
+  commands: {
+    autoDeploy: toBool(process.env.AUTO_DEPLOY_COMMANDS, true),
+  },
+
   /** HTTP health endpoint - Pterodactyl sets SERVER_PORT automatically. */
   health: {
     port: toNumber(process.env.SERVER_PORT ?? process.env.HEALTH_PORT, 0),

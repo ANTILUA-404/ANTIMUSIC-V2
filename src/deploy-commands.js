@@ -1,49 +1,43 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { REST, Routes } from 'discord.js';
+import { Client, Events, GatewayIntentBits } from 'discord.js';
 import { config } from './config.js';
+import { loadCommands } from './loaders.js';
+import { syncCommands } from './utils/command-sync.js';
 import { createLogger } from './utils/logger.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const log = createLogger('deploy');
 
-async function collectCommands() {
-  const dir = path.join(__dirname, 'commands');
-  const body = [];
-  for (const file of fs.readdirSync(dir).filter((name) => name.endsWith('.js'))) {
-    const module = await import(pathToFileURL(path.join(dir, file)).href);
-    if (module.default?.data) body.push(module.default.data.toJSON());
-  }
-  return body;
-}
-
+/**
+ * Deploy manual.
+ *
+ * Sebenarnya TIDAK PERLU dijalankan lagi: bot mendaftarkan slash command
+ * sendiri setiap kali start (lihat src/utils/command-sync.js).
+ * Script ini berguna kalau mau memaksa daftar ulang sekarang juga.
+ */
 async function main() {
   if (!config.token) {
-    log.error('DISCORD_TOKEN kosong. Isi dulu di .env');
+    log.error('DISCORD_TOKEN kosong. Isi di .env atau di tab Startup panel.');
     process.exit(1);
   }
 
-  const body = await collectCommands();
-  const rest = new REST().setToken(config.token);
+  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+  await loadCommands(client);
 
-  let clientId = config.clientId;
-  if (!clientId) {
-    const me = await rest.get(Routes.user());
-    clientId = me.id;
-    log.info(`CLIENT_ID tidak diisi, memakai id dari token: ${clientId}`);
+  const ready = new Promise((resolve) => client.once(Events.ClientReady, resolve));
+  await client.login(config.token);
+  await ready;
+
+  const result = await syncCommands(client, { force: true });
+
+  for (const entry of result.results ?? []) {
+    if (entry.error) log.error(`${entry.scope}: ${entry.error}`);
+    else log.info(`${entry.scope}: ${entry.changed ? 'didaftarkan' : 'sudah sinkron'} (${entry.count ?? 0} command)`);
   }
 
-  if (config.guildId) {
-    await rest.put(Routes.applicationGuildCommands(clientId, config.guildId), { body });
-    log.info(`✅ ${body.length} command terdaftar di guild ${config.guildId} (langsung aktif).`);
-  } else {
-    await rest.put(Routes.applicationCommands(clientId), { body });
-    log.info(`✅ ${body.length} command terdaftar global (butuh sampai 1 jam buat muncul di semua server).`);
-  }
+  log.info('Selesai. Bot akan mendaftar ulang otomatis kalau command berubah.');
+  client.destroy();
 }
 
 main().catch((error) => {
-  log.error('Deploy command gagal:', error);
+  log.error('Deploy command gagal:', error.message ?? error);
   process.exit(1);
 });

@@ -100,3 +100,47 @@ test('all audio filters are non-empty strings except none', () => {
     assert.ok(filter.length > 3, `${name} filter terlalu pendek`);
   }
 });
+
+test('loadCommands memuat seluruh command dari folder commands', async () => {
+  const { loadCommands } = await import('../src/loaders.js');
+  const fakeClient = { commands: new Map() };
+  await loadCommands(fakeClient);
+  assert.equal(fakeClient.commands.size, 18);
+  assert.ok(fakeClient.commands.has('play'));
+  assert.ok(fakeClient.commands.has('radio'));
+});
+
+test('syncCommands tidak error kalau client belum siap', async () => {
+  const { syncCommands } = await import('../src/utils/command-sync.js');
+  const result = await syncCommands({ commands: new Map() });
+  assert.equal(result.skipped, true);
+});
+
+test('syncCommands mendaftar per-guild dan tidak mengulang saat payload sama', async () => {
+  const { syncCommands } = await import('../src/utils/command-sync.js');
+  const calls = [];
+  const fakeClient = {
+    application: {
+      commands: {
+        set: async (body, scope) => {
+          calls.push({ scope: scope ?? 'global', count: body.length });
+        },
+      },
+    },
+    guilds: { cache: new Map([['111', {}], ['222', {}]]) },
+    commands: new Map([
+      ['play', { data: { toJSON: () => ({ name: 'play', description: 'putar' }) } }],
+      ['stop', { data: { toJSON: () => ({ name: 'stop', description: 'stop' }) } }],
+    ]),
+  };
+
+  await syncCommands(fakeClient, { force: true });
+  assert.equal(calls.length, 2, 'harus daftar ke 2 guild');
+  assert.deepEqual(calls.map((c) => c.scope).sort(), ['111', '222']);
+  assert.equal(calls[0].count, 2);
+
+  // Panggilan kedua dengan payload identik harus dilewati (anti rate-limit).
+  const before = calls.length;
+  await syncCommands(fakeClient);
+  assert.equal(calls.length, before, 'tidak boleh memanggil API lagi');
+});

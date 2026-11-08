@@ -46,29 +46,51 @@ cuma Java-nya sekarang boleh dihapus.
 
 ---
 
-## Quick start
+## Quick start — cukup isi token, lalu Start
+
+Bot ini **zero-setup**. Saat start dia melakukan sendiri:
+
+| Otomatis | Kapan |
+|---|---|
+| `npm install` kalau `node_modules` belum ada | sebelum bot dimuat |
+| Unduh FFmpeg + yt-dlp ke `bin/` | setelah install / saat boot |
+| Daftarkan 18 slash command | setiap start, hanya kalau command berubah |
+| Buka health endpoint di `SERVER_PORT` | saat boot (dipakai panel) |
+| Pulihkan sesi radio 24/7 | saat boot |
+
+Jadi yang perlu kamu lakukan cuma **satu**: memberi token.
+
+### Paling cepat — import egg Pterodactyl
+
+1. Admin panel → **Nests** → **Import Egg** → pilih `deploy/pterodactyl-egg.json`
+2. **Create Server** pakai egg `ANTIMUSIC v3`
+3. Isi **Discord Bot Token** di tab Startup
+4. **Start**
+
+Installer otomatis clone repo, `npm install`, dan mengunduh FFmpeg + yt-dlp.
+Setelah itu setiap restart akan `git pull` sendiri (`AUTO_UPDATE=1`).
+
+### Kalau server-nya sudah ada (upgrade)
 
 ```bash
-npm install
-cp .env.example .env      # Windows: copy .env.example .env
+git pull
 ```
 
-Isi `.env`:
+lalu isi `DISCORD_TOKEN` di tab **Startup** panel (atau di `.env`), dan tekan **Start**.
+**Tidak perlu** `npm install` manual, **tidak perlu** `npm run deploy`.
 
-```env
-DISCORD_TOKEN=token_bot_kamu
-CLIENT_ID=application_id_kamu
-GUILD_ID=id_server_kamu        # opsional, command langsung muncul
-```
-
-Daftarkan slash command lalu jalankan:
+### Jalan di komputer sendiri
 
 ```bash
-npm run deploy
+npm install          # sekaligus unduh FFmpeg + yt-dlp
+cp .env.example .env # isi DISCORD_TOKEN
 npm start
 ```
 
-Invite bot (ganti `CLIENT_ID`):
+Variabel minimal yang wajib: **`DISCORD_TOKEN`** saja.
+`CLIENT_ID` opsional (diambil dari token), `GUILD_ID` opsional.
+
+Invite bot (ganti `CLIENT_ID` dengan Application ID kamu):
 
 ```
 https://discord.com/oauth2/authorize?client_id=CLIENT_ID&permissions=3230720&scope=bot%20applications.commands
@@ -80,7 +102,7 @@ https://discord.com/oauth2/authorize?client_id=CLIENT_ID&permissions=3230720&sco
 ### Cek dulu kalau ada masalah
 
 ```bash
-npm run doctor       # node, ffmpeg, yt-dlp, token, spotify, opus
+npm run doctor       # node, ffmpeg, yt-dlp, token, spotify, opus, whitelist
 npm run check        # validasi syntax + payload semua command
 npm test             # unit test logika inti
 npm run audio-test   # tes pipeline audio nyata (tanpa Discord)
@@ -89,6 +111,7 @@ npm run audio-test   # tes pipeline audio nyata (tanpa Discord)
 ---
 
 ## Command
+
 
 | Command | Fungsi |
 |---|---|
@@ -228,13 +251,15 @@ Bot memakai *Client Credentials flow* (metadata publik saja, tanpa login user).
 ## Struktur project
 
 ```
-index.js / start.js          # entrypoint (dipakai Pterodactyl)
+index.js / start.js          # entrypoint + bootstrap npm install otomatis
+deploy/pterodactyl-egg.json  # egg siap import (nol setup)
 src/
 ├── index.js                 # bootstrap: load command/event, yt-dlp, health, login
 ├── config.js                # semua env + resolusi path binary
 ├── health.js                # HTTP health endpoint untuk panel
 ├── whitelist.js             # lisensi server (env + data/whitelist.json)
-├── deploy-commands.js
+├── deploy-commands.js        # deploy manual (opsional, sudah otomatis)
+├── loaders.js               # loader command & event
 ├── commands/                # 18 slash command
 ├── events/                  # interactionCreate, ready, guildCreate, voiceStateUpdate
 ├── resolvers/index.js       # query/URL -> Track
@@ -244,7 +269,7 @@ src/
 │   ├── Spotify.js           # Web API + fallback embed/oEmbed
 │   ├── RadioStore.js        # station + sesi 24/7 (JSON)
 │   └── MusicClient.js
-├── utils/                   # ytdlp(+install), ffmpeg-install, store, format, logger, guards, embed
+├── utils/                   # ytdlp(+install), ffmpeg-install, command-sync, store, format, logger, guards, embed
 └── data/stations.js         # preset radio
 
 scripts/                     # check, doctor, audio-test, install-ffmpeg, install-ytdlp, postinstall

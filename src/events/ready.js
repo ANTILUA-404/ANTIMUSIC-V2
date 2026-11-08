@@ -1,6 +1,7 @@
 import { ActivityType, Events } from 'discord.js';
 import { config } from '../config.js';
 import { clear247, getStation, list247 } from '../structures/RadioStore.js';
+import { syncCommands } from '../utils/command-sync.js';
 import { createLogger } from '../utils/logger.js';
 import { whitelist } from '../whitelist.js';
 
@@ -71,6 +72,9 @@ export default {
     });
 
     await sweepUnauthorizedGuilds(client);
+
+    // Zero-setup: slash command didaftarkan sendiri, tidak perlu `npm run deploy`.
+    await syncCommands(client);
 
     if (config.radio.restoreOnBoot) await restoreRadioSessions(client);
   },

@@ -1,7 +1,8 @@
 /**
  * Alias entry point.
  *
- * Some Pterodactyl eggs use `start.js` as MAIN_FILE. Kept so both
- * `node index.js` and `node start.js` work.
+ * Beberapa egg Pterodactyl memakai `start.js` sebagai MAIN_FILE.
+ * File ini hanya meneruskan ke index.js supaya bootstrap dependency
+ * (npm install otomatis) tetap ikut jalan.
  */
-import "./index.js";
+import './index.js';
