@@ -155,15 +155,15 @@ fi
 # SERVER_PORT / PORT adalah milik platform, bukan milik Lavalink.
 unset SERVER_PORT SERVER_PORT_LOCAL || true
 
-if [[ ! -f Lavalink.jar ]]; then
-  echo "Lavalink.jar tidak ada — mengunduh ${LAVALINK_VERSION:-4.2.2}..."
-  curl -fsSL -o Lavalink.jar \
-    "https://github.com/lavalink-devs/Lavalink/releases/download/${LAVALINK_VERSION:-4.2.2}/Lavalink.jar"
-fi
-
 if [[ "${GENERATE_ONLY:-0}" == "1" ]]; then
   echo "application.yml ditulis (GENERATE_ONLY=1), tidak menjalankan Lavalink."
   exit 0
+fi
+
+if [[ ! -f Lavalink.jar ]]; then
+  echo "Lavalink.jar tidak ada — mengunduh ${LAVALINK_VERSION:-4.2.2}..."
+  curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors -o Lavalink.jar \
+    "https://github.com/lavalink-devs/Lavalink/releases/download/${LAVALINK_VERSION:-4.2.2}/Lavalink.jar"
 fi
 
 echo "Menjalankan Lavalink di 0.0.0.0:${PORT} ..."

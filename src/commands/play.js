@@ -6,7 +6,6 @@ import {
   StringSelectMenuOptionBuilder,
 } from 'discord.js';
 import { config } from '../config.js';
-import { resolveQuery } from '../resolvers/index.js';
 import { addedEmbed, errorEmbed, playlistEmbed } from '../utils/discord.js';
 import { formatDuration, truncate } from '../utils/format.js';
 import { ensureVoiceChannel } from '../utils/guards.js';
@@ -78,7 +77,8 @@ export default {
     const player = client.playerFor(interaction.guild);
     await player.join(channel);
 
-    const result = await resolveQuery(query, {
+    const engine = await client.ensureEngine();
+    const result = await engine.resolve(query, {
       requester: interaction.user.id,
       limit: config.defaults.maxQueue,
     });

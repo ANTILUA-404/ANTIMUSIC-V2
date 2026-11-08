@@ -1,9 +1,7 @@
 import { config } from '../config.js';
 import { createLogger } from '../utils/logger.js';
-import { relatedTracks } from '../utils/ytdlp.js';
 import { UserError } from '../utils/guards.js';
 import { stationToTrack } from './RadioStore.js';
-import { Track } from './Track.js';
 
 const log = createLogger('player');
 
@@ -364,6 +362,7 @@ export class GuildPlayer {
 
   #fetchAutoplay() {
     if (!this.current) return Promise.resolve([]);
+
     const videoId =
       this.current.stream?.target?.match(/[?&]v=([\w-]{11})/)?.[1] ||
       this.current.url?.match(/[?&]v=([\w-]{11})/)?.[1];
@@ -372,12 +371,13 @@ export class GuildPlayer {
     const played = new Set(this.queue.map((track) => track.title.toLowerCase()));
     played.add(this.current.title.toLowerCase());
 
-    return relatedTracks(videoId, 10).then((related) =>
-      related
-        .filter((item) => !played.has(item.title.toLowerCase()))
-        .slice(0, 5)
-        .map((item) => Track.fromYtdlp(item, this.client.user?.id ?? null, 'Autoplay')),
-    );
+    return this.engine
+      .related(videoId, 8)
+      .then((related) => related.filter((track) => !played.has(track.title.toLowerCase())).slice(0, 5))
+      .catch((error) => {
+        log.warn(`[${this.guild.id}] autoplay gagal: ${error.message}`);
+        return [];
+      });
   }
 
   #scheduleIdleLeave() {

@@ -1,6 +1,8 @@
 import { EventEmitter } from 'node:events';
 import { LavalinkManager } from 'lavalink-client';
 import { config } from '../config.js';
+import { isSpotifyUrl, resolveSpotify } from '../structures/Spotify.js';
+import { Track } from '../structures/Track.js';
 import { createLogger } from '../utils/logger.js';
 import { FILTERS } from './filters.js';
 import { waitForLavalink } from './lavalink-node.js';
@@ -262,6 +264,82 @@ export class LavalinkEngine extends EventEmitter {
     track.encoded = found.encoded;
     if (!track.duration && found.info?.duration) track.duration = Math.round(found.info.duration / 1000);
     return found;
+  }
+
+  /* -------------------------------- resolve ------------------------------ */
+
+  #anyNode() {
+    const node = [...this.manager.nodeManager.nodes.values()].find((n) => n.connected && n.info);
+    if (!node) throw new Error('Belum ada node Lavalink yang siap. Coba /engine status.');
+    return node;
+  }
+
+  /**
+   * Resolver untuk /play.
+   *
+   * Semua pencarian dilakukan oleh Lavalink, jadi dengan engine ini bot TIDAK
+   * membutuhkan yt-dlp sama sekali (yt-dlp hanya dipakai engine lokal).
+   */
+  async resolve(input, { requester = null, limit = 100 } = {}) {
+    const query = String(input || '').trim();
+    if (!query) throw new Error('Query-nya kosong.');
+
+    // Spotify tetap lewat resolver kita (metadata), audio dicarikan Lavalink.
+    if (isSpotifyUrl(query)) {
+      const resolved = await resolveSpotify(query, { requester, limit });
+      return {
+        type: resolved.type,
+        tracks: resolved.tracks,
+        playlistName: resolved.playlistName,
+        warning: resolved.warning,
+      };
+    }
+
+    const node = this.#anyNode();
+    const isLink = /^https?:\/\//i.test(query);
+    const result = await node.search(
+      { query, source: isLink ? undefined : config.audio.lavalink.searchSource },
+      requester ? { id: requester } : { id: 'unknown' },
+    );
+
+    const tracks = result?.tracks ?? [];
+    if (!tracks.length) throw new Error(`Tidak ada hasil untuk "${query}".`);
+
+    if (result.loadType === 'playlist') {
+      return {
+        type: 'playlist',
+        tracks: tracks.slice(0, limit).map((t) => Track.fromLavalink(t, requester, result.playlistInfo?.name ?? null)),
+        playlistName: result.playlistInfo?.name ?? 'Playlist',
+      };
+    }
+
+    if (isLink) {
+      return { type: 'track', tracks: [Track.fromLavalink(tracks[0], requester)] };
+    }
+
+    return {
+      type: 'search',
+      query,
+      tracks: tracks.slice(0, limit).map((t) => Track.fromLavalink(t, requester)),
+    };
+  }
+
+  /** Lagu terkait untuk autoplay, tanpa yt-dlp (pakai YouTube Mix). */
+  async related(videoId, limit = 5) {
+    try {
+      const node = this.#anyNode();
+      const result = await node.search(
+        { query: `https://www.youtube.com/watch?v=${videoId}&list=RD${videoId}` },
+        { id: 'autoplay' },
+      );
+      return (result?.tracks ?? [])
+        .filter((track) => track.info?.identifier !== videoId)
+        .slice(0, limit)
+        .map((track) => Track.fromLavalink(track, null, 'Autoplay'));
+    } catch (error) {
+      log.warn(`autoplay gagal: ${error.message}`);
+      return [];
+    }
   }
 
   /* ------------------------------- controls ------------------------------ */

@@ -8,7 +8,22 @@ import { createLogger } from './logger.js';
 
 const log = createLogger('yt-dlp');
 
-const RELEASE_BASE = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download';
+// Dua kanal: rilis stabil, lalu nightly. Kalau GitHub sedang lemot/504,
+// kanal kedua sering masih jalan.
+const CHANNELS = [
+  'https://github.com/yt-dlp/yt-dlp/releases/latest/download',
+  'https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download',
+];
+
+async function fetchWithTimeout(url, timeoutMs = 60_000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { redirect: 'follow', signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export function isYtdlpUsable(bin = config.ytdlp.bin) {
   try {
@@ -21,20 +36,36 @@ export function isYtdlpUsable(bin = config.ytdlp.bin) {
 
 async function downloadTo(target) {
   const asset = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
-  const url = `${RELEASE_BASE}/${asset}`;
-  log.info(`Mengunduh yt-dlp dari ${url} ...`);
-
-  const response = await fetch(url, { redirect: 'follow' });
-  if (!response.ok) throw new Error(`HTTP ${response.status} saat mengunduh yt-dlp`);
-  if (!response.body) throw new Error('Response kosong saat mengunduh yt-dlp');
-
-  fs.mkdirSync(path.dirname(target), { recursive: true });
   const temp = `${target}.download`;
-  await pipeline(Readable.fromWeb(response.body), fs.createWriteStream(temp));
+  const errors = [];
 
-  if (process.platform !== 'win32') fs.chmodSync(temp, 0o755);
-  fs.renameSync(temp, target);
-  return target;
+  for (const base of CHANNELS) {
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        log.info(`Mengunduh yt-dlp (percobaan ${attempt}) dari ${base} ...`);
+        const response = await fetchWithTimeout(`${base}/${asset}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.body) throw new Error('response kosong');
+
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        await pipeline(Readable.fromWeb(response.body), fs.createWriteStream(temp));
+
+        if (process.platform !== 'win32') fs.chmodSync(temp, 0o755);
+        fs.renameSync(temp, target);
+        return target;
+      } catch (error) {
+        errors.push(`${new URL(base).host}: ${error.message}`);
+        try {
+          fs.rmSync(temp, { force: true });
+        } catch {
+          /* ignore */
+        }
+        if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+    }
+  }
+
+  throw new Error(`semua sumber gagal (${errors.join('; ')})`);
 }
 
 /**
@@ -65,8 +96,13 @@ export async function ensureYtdlp({ force = false } = {}) {
     log.info(`yt-dlp siap dipakai: ${target}`);
     return target;
   } catch (error) {
-    log.error(`Gagal menyiapkan yt-dlp otomatis: ${error.message}`);
-    log.error('Install manual lalu set YTDLP_PATH di .env (lihat README).');
+    if (config.audio.lavalink.enabled) {
+      log.warn(`yt-dlp tidak tersedia (${error.message}) — TIDAK masalah: Lavalink aktif, jadi pencarian & pemutaran tetap jalan.`);
+      log.warn('yt-dlp hanya dipakai kalau bot turun ke engine lokal.');
+    } else {
+      log.error(`Gagal menyiapkan yt-dlp otomatis: ${error.message}`);
+      log.error('Install manual lalu set YTDLP_PATH di .env (lihat TUTORIAL.md).');
+    }
     return null;
   }
 }

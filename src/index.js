@@ -11,6 +11,52 @@ import { ensureYtdlp } from './utils/ytdlp-install.js';
 const log = createLogger('main');
 const DRY_RUN = process.argv.includes('--dry-run');
 
+/**
+ * Coba unduh yt-dlp lagi secara berkala (5, 10, 15, ... menit, maks 8x).
+ *
+ * Hanya relevan kalau Lavalink aktif: tanpa yt-dlp bot tetap bisa mencari dan
+ * memutar lewat Lavalink. Kalau GitHub sedang 504, ini yang menyembuhkan sendiri
+ * tanpa perlu restart.
+ */
+function scheduleYtdlpRetry(attempt) {
+  if (attempt > 8) {
+    log.warn('Berhenti mencoba unduh yt-dlp. Bot tetap jalan lewat Lavalink.');
+    return;
+  }
+
+  const delayMs = Math.min(30 * 60_000, attempt * 5 * 60_000);
+  log.info(`yt-dlp belum ada, coba lagi dalam ${Math.round(delayMs / 60_000)} menit.`);
+
+  const timer = setTimeout(async () => {
+    try {
+      const bin = await ensureYtdlp();
+      if (bin) log.info(`yt-dlp berhasil diunduh (percobaan ${attempt}): ${bin}`);
+      else scheduleYtdlpRetry(attempt + 1);
+    } catch {
+      scheduleYtdlpRetry(attempt + 1);
+    }
+  }, delayMs);
+
+  timer.unref?.();
+}
+
+async function shutdown(client, signal) {
+  log.info(`Menerima ${signal}, mematikan bot...`);
+  for (const player of [...client.players.values()]) {
+    try {
+      await player.destroy();
+    } catch {
+      /* ignore */
+    }
+  }
+  try {
+    client.destroy();
+  } catch {
+    /* ignore */
+  }
+  process.exit(0);
+}
+
 async function main() {
   const client = new MusicClient();
   await loadCommands(client);
@@ -38,7 +84,20 @@ async function main() {
 
   // FFmpeg dulu: yt-dlp butuh tahu lokasinya untuk stream live/HLS.
   await ensureFfmpeg();
-  await ensureYtdlp();
+
+  // Kalau Lavalink aktif, yt-dlp tidak dipakai untuk cari/putar apa pun.
+  // Jangan tahan startup karena unduhan yang lambat atau kena 504.
+  if (config.audio.lavalink.enabled && config.audio.engine !== 'local') {
+    // Tidak menahan startup. Kalau gagal (mis. GitHub 504), coba lagi berkala
+    // di background sampai berhasil — tanpa perlu restart bot.
+    ensureYtdlp()
+      .then((bin) => {
+        if (!bin) scheduleYtdlpRetry(1);
+      })
+      .catch(() => scheduleYtdlpRetry(1));
+  } else {
+    await ensureYtdlp();
+  }
   startHealthServer(client, { version: pkg.version });
 
   client.on('error', (error) => log.error('Discord client error:', error.message));

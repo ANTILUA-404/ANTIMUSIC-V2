@@ -360,3 +360,70 @@ test('probeLavalink: 401 jadi kind auth dengan hint password', async () => {
     },
   );
 });
+
+test('LavalinkEngine.resolve memakai node Lavalink (tanpa yt-dlp)', async () => {
+  const { LavalinkEngine } = await import('../src/audio/lavalink-engine.js');
+  const client = { user: { id: '1', username: 'bot' }, guilds: { cache: new Map() } };
+  const engine = new LavalinkEngine(client);
+
+  const calls = [];
+  const makeTrack = (id, title) => ({
+    encoded: `ENC-${id}`,
+    info: {
+      identifier: id,
+      title,
+      author: 'Artist',
+      duration: 200_000,
+      uri: `https://youtu.be/${id}`,
+      artworkUrl: null,
+      sourceName: 'youtube',
+      isStream: false,
+    },
+  });
+
+  engine.manager = {
+    nodeManager: {
+      nodes: new Map([
+        [
+          'mock',
+          {
+            connected: true,
+            info: { version: { semver: '4.2.2' } },
+            search: async (query, requester) => {
+              calls.push({ query, requester });
+              if (String(query.query).includes('list=')) {
+                return {
+                  loadType: 'playlist',
+                  playlistInfo: { name: 'Mix' },
+                  tracks: [makeTrack('a', 'A'), makeTrack('b', 'B'), makeTrack('c', 'C')],
+                };
+              }
+              return { loadType: 'search', tracks: [makeTrack('x', 'Song X'), makeTrack('y', 'Song Y')] };
+            },
+          },
+        ],
+      ]),
+    },
+  };
+
+  const search = await engine.resolve('lofi hip hop', { requester: 'u1', limit: 5 });
+  assert.equal(search.type, 'search');
+  assert.equal(search.tracks.length, 2);
+  assert.equal(search.tracks[0].title, 'Song X');
+  assert.equal(search.tracks[0].encoded, 'ENC-x', 'encoded ikut disimpan supaya replay tidak query ulang');
+  assert.equal(search.tracks[0].duration, 200);
+  assert.deepEqual(calls.at(-1).query, { query: 'lofi hip hop', source: 'youtube' });
+
+  const link = await engine.resolve('https://youtu.be/x', { requester: 'u1' });
+  assert.equal(link.type, 'track');
+  assert.equal(link.tracks.length, 1);
+  assert.equal(calls.at(-1).query.source, undefined, 'link tidak pakai source');
+
+  const related = await engine.related('x', 2);
+  assert.equal(related.length, 2);
+  assert.equal(related[0].playlist, 'Autoplay');
+
+  const offline = new LavalinkEngine(client);
+  offline.manager = { nodeManager: { nodes: new Map() } };
+  await assert.rejects(() => offline.resolve('apa saja'), /node Lavalink/i);
+});

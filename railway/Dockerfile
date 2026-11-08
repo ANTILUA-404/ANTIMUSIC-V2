@@ -13,7 +13,7 @@ RUN apt-get update \
 WORKDIR /opt/lavalink
 
 # JAR di-bake supaya cold start tidak perlu unduh 96 MB lagi.
-RUN curl -fsSL -o Lavalink.jar \
+RUN curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors -o Lavalink.jar \
     "https://github.com/lavalink-devs/Lavalink/releases/download/${LAVALINK_VERSION}/Lavalink.jar"
 
 COPY start.sh ./start.sh

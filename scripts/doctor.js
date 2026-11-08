@@ -43,7 +43,11 @@ try {
   const version = execFileSync(config.ytdlp.bin, ['--version'], { encoding: 'utf8', timeout: 20_000 }).trim();
   add('ok', `yt-dlp ${version}`, config.ytdlp.bin);
 } catch {
-  add('bad', 'yt-dlp tidak ditemukan', 'install: winget install yt-dlp / pip install -U yt-dlp / brew install yt-dlp');
+  if (config.audio.lavalink.enabled) {
+    add('warn', 'yt-dlp tidak ada (opsional)', 'Lavalink aktif: pencarian & pemutaran tetap jalan');
+  } else {
+    add('bad', 'yt-dlp tidak ditemukan', 'jalankan: npm run install:ytdlp');
+  }
 }
 
 // token

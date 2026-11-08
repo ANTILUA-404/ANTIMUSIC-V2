@@ -1,17 +1,17 @@
 # 📘 Tutorial Lengkap — dari nol sampai bot bunyi
 
-Panduan ini ditulis urut. Ikuti dari atas, jangan lompat. Setiap langkah ada
-**✅ checkpoint** — kalau hasilnya beda, berhenti di situ dan cek bagian
+Panduan ini ditulis urut. Ikuti dari atas, jangan lompat. Setiap langkah ada  
+**✅ checkpoint** — kalau hasilnya beda, berhenti di situ dan cek bagian  
 [Troubleshooting](#9-troubleshooting).
 
 Dua jalur yang bisa kamu pilih:
 
-| Jalur | Butuh | Hasil |
-|---|---|---|
-| **A. Cepat** (bagian 1 + 3 + 5) | token Discord + panel hosting | bot jalan pakai engine lokal (yt-dlp + FFmpeg) |
-| **B. Lengkap** (semua bagian) | + akun Railway | bot jalan pakai Lavalink (kualitas & sumber maksimal) |
+| Jalur                           | Butuh                         | Hasil                                                 |
+| ------------------------------- | ----------------------------- | ----------------------------------------------------- |
+| **A. Cepat** (bagian 1 + 3 + 5) | token Discord + panel hosting | bot jalan pakai engine lokal (yt-dlp + FFmpeg)        |
+| **B. Lengkap** (semua bagian)   | + akun Railway                | bot jalan pakai Lavalink (kualitas & sumber maksimal) |
 
-Kalau baru pertama kali, **selesaikan jalur A dulu** sampai bot bunyi. Baru
+Kalau baru pertama kali, **selesaikan jalur A dulu** sampai bot bunyi. Baru  
 lanjut ke Railway. Lebih gampang debug satu masalah daripada dua.
 
 ---
@@ -35,7 +35,7 @@ Yang **tidak** perlu: Java, Lavalink lokal, VPS, coding.
 
 1. Buka <https://discord.com/developers/applications>
 2. Klik **New Application** → kasih nama (mis. `ANTIMUSIC`) → **Create**
-3. Di tab **General Information**, catat **Application ID** (deretan angka panjang).
+3. Di tab **General Information**, catat **Application ID** (deretan angka panjang).  
    Ini yang nanti jadi `CLIENT_ID`.
 
 ### 1.2 Ambil token
@@ -44,15 +44,15 @@ Yang **tidak** perlu: Java, Lavalink lokal, VPS, coding.
 2. Klik **Reset Token** → **Yes, do it!**
 3. Klik **Copy**
 
-> ⚠️ Token ini seperti password. Jangan pernah commit ke GitHub, jangan kirim ke
+> ⚠️ Token ini seperti password. Jangan pernah commit ke GitHub, jangan kirim ke  
 > orang. Kalau bocor, langsung **Reset Token** lagi.
 
 ✅ **Checkpoint:** kamu punya 2 hal — `Application ID` dan `Token`.
 
 ### 1.3 Jangan centang apa pun di "Privileged Gateway Intents"
 
-Bot ini **tidak butuh** Message Content, Presence, atau Server Members Intent.
-Biarkan semuanya OFF. Kalau kamu mencentangnya tanpa alasan, Discord bisa minta
+Bot ini **tidak butuh** Message Content, Presence, atau Server Members Intent.  
+Biarkan semuanya OFF. Kalau kamu mencentangnya tanpa alasan, Discord bisa minta  
 verifikasi bot untuk server besar.
 
 ### 1.4 Undang bot ke server
@@ -65,7 +65,7 @@ https://discord.com/oauth2/authorize?client_id=CLIENT_ID&permissions=3230720&sco
 
 Pilih server → **Authorize**.
 
-Angka `3230720` itu paket izin: View Channel, Send Messages, Embed Links,
+Angka `3230720` itu paket izin: View Channel, Send Messages, Embed Links,  
 Read History, **Connect**, **Speak**.
 
 ✅ **Checkpoint:** bot muncul di daftar member server kamu (statusnya offline, wajar).
@@ -76,7 +76,7 @@ Read History, **Connect**, **Speak**.
 
 > Lewati bagian ini kalau kamu pilih **jalur A**. Bot tetap jalan tanpa Lavalink.
 
-Lavalink = server audio terpisah. Tugasnya decode audio dan encode Opus, jadi CPU
+Lavalink = server audio terpisah. Tugasnya decode audio dan encode Opus, jadi CPU  
 panel kamu kosong dan kualitasnya bisa diatur sampai `opusEncodingQuality: 10`.
 
 ### 2.1 Siapkan repo
@@ -88,7 +88,7 @@ Railway butuh akses ke repo GitHub. Kalau repo-nya belum ada di akun kamu:
 
 Sekarang kamu punya salinan di `github.com/USERNAME/ANTIMUSIC-V2`.
 
-> Pakai fork supaya update dari upstream tetap bisa (`git pull`), dan Railway
+> Pakai fork supaya update dari upstream tetap bisa (`git pull`), dan Railway  
 > bisa deploy ulang tiap kamu push.
 
 ### 2.2 Buat project Railway
@@ -96,7 +96,7 @@ Sekarang kamu punya salinan di `github.com/USERNAME/ANTIMUSIC-V2`.
 1. Buka <https://railway.com> → login pakai GitHub
 2. **New Project** → **Deploy from GitHub repo**
 3. Pilih repo `ANTIMUSIC-V2`
-4. Railway mulai build. **Jangan tunggu** — kita harus set folder dulu (langkah 2.3),
+4. Railway mulai build. **Jangan tunggu** — kita harus set folder dulu (langkah 2.3),  
    karena build pertama akan gagal (dia baca Dockerfile bot, bukan Lavalink).
 
 ### 2.3 Set Root Directory (WAJIB)
@@ -112,33 +112,33 @@ Ini memberi tahu Railway: "Dockerfile Lavalink ada di folder `railway/`, bukan d
 
 Tab **Variables** → **New Variable**, tambahkan:
 
-| Name | Value | Wajib? |
-|---|---|---|
-| `LAVALINK_PASSWORD` | password buatan sendiri, mis. `antimusic-9f3k2` | ✅ |
-| `JAVA_MEMORY_MB` | `512` | ✅ |
+| Name                | Value                                           | Wajib? |
+| ------------------- | ----------------------------------------------- | ------ |
+| `LAVALINK_PASSWORD` | password buatan sendiri, mis. `antimusic-9f3k2` | ✅      |
+| `JAVA_MEMORY_MB`    | `512`                                           | ✅      |
 
 Catat password-nya — nanti dipakai bot.
 
 Opsional (lihat [bagian 6](#6-setelan-kualitas-audio)):
 
-| Name | Value | Efek |
-|---|---|---|
-| `OPUS_ENCODING_QUALITY` | `10` | kualitas Opus maksimal (default sudah 10) |
-| `RESAMPLING_QUALITY` | `HIGH` | kualitas resampling |
-| `SPOTIFY_CLIENT_ID` | — | Spotify resolve langsung (butuh pasangan) |
-| `SPOTIFY_CLIENT_SECRET` | — | wajib bareng Client ID |
+| Name                    | Value  | Efek                                      |
+| ----------------------- | ------ | ----------------------------------------- |
+| `OPUS_ENCODING_QUALITY` | `10`   | kualitas Opus maksimal (default sudah 10) |
+| `RESAMPLING_QUALITY`    | `HIGH` | kualitas resampling                       |
+| `SPOTIFY_CLIENT_ID`     | —      | Spotify resolve langsung (butuh pasangan) |
+| `SPOTIFY_CLIENT_SECRET` | —      | wajib bareng Client ID                    |
 
-> ⚠️ **Jangan aktifkan source tanpa kredensial.** Kalau kamu isi
-> `SPOTIFY_CLIENT_ID` tapi `SPOTIFY_CLIENT_SECRET` kosong, start script
-> otomatis mematikan Spotify (aman). Tapi kalau kamu edit `application.yml`
-> manual dan menyalakan source tanpa key, **seluruh Lavalink mati** dengan
+> ⚠️ **Jangan aktifkan source tanpa kredensial.** Kalau kamu isi  
+> `SPOTIFY_CLIENT_ID` tapi `SPOTIFY_CLIENT_SECRET` kosong, start script  
+> otomatis mematikan Spotify (aman). Tapi kalau kamu edit `application.yml`  
+> manual dan menyalakan source tanpa key, **seluruh Lavalink mati** dengan  
 > `Deezer master key must be set` / `Spotify client id must be set`.
 
 ### 2.5 Deploy ulang
 
 **Deployments** → titik tiga kanan atas → **Redeploy**.
 
-Build pertama ~3–5 menit (unduh JRE + `Lavalink.jar` 96 MB). Log akan berhenti
+Build pertama ~3–5 menit (unduh JRE + `Lavalink.jar` 96 MB). Log akan berhenti  
 lama di `Downloading...` — itu normal.
 
 ### 2.6 Buka akses publik
@@ -151,7 +151,7 @@ lama di `Downloading...` — itu normal.
 antimusic-production-a1b2.up.railway.app
 ```
 
-✅ **Checkpoint:** buka domain itu di browser, tambahkan `/version`.
+✅ **Checkpoint:** buka domain itu di browser, tambahkan `/version`.  
 Harus muncul JSON:
 
 ```json
@@ -195,7 +195,7 @@ Titik di akhir penting: artinya "clone ke folder ini".
 
 1. Tab **Files** → **Upload** → pilih ZIP project
 2. Klik kanan ZIP → **Unzip**
-3. Kalau hasilnya jadi `antimusic/antimusic/...`, pindahkan isinya ke root
+3. Kalau hasilnya jadi `antimusic/antimusic/...`, pindahkan isinya ke root  
    (pilih semua di subfolder → **Move** → `/`)
 
 ✅ **Checkpoint:** di root `/home/container/` ada `index.js`, `package.json`, dan folder `src/`.
@@ -210,14 +210,14 @@ DISCORD_TOKEN=token_dari_langkah_1
 
 Simpan. Itu saja yang wajib.
 
-> **Startup Command tidak perlu diubah.** Kalau field itu di-lock panel, biarkan.
+> **Startup Command tidak perlu diubah.** Kalau field itu di-lock panel, biarkan.  
 > Repo ini jalan dengan `node index.js`, `node start.js`, maupun `npm start`.
 
 ### 3.3 Restart
 
 Klik **Restart** (atau **Start** kalau mati).
 
-**Pertama kali start butuh 1–3 menit**, karena bot mengunduh FFmpeg (±28 MB) dan
+**Pertama kali start butuh 1–3 menit**, karena bot mengunduh FFmpeg (±28 MB) dan  
 yt-dlp (±30 MB) ke folder `bin/`. Sabar.
 
 ✅ **Checkpoint — console harus menampilkan urutan ini:**
@@ -234,15 +234,15 @@ INFO  [ready] Login sebagai ANTIMUSIC#7110 • 1 server • 19 command
 INFO  [commands] 19 slash command didaftarkan → guild 123... (instan)
 ```
 
-Kalau baris pertama bilang `tidak ada .env`, file-nya belum kebaca — lihat
+Kalau baris pertama bilang `tidak ada .env`, file-nya belum kebaca — lihat  
 [Troubleshooting](#9-troubleshooting) baris pertama.
 
 ### 3.4 Slash command muncul di Discord
 
-Buka server kamu, ketik `/` di kolom chat. Harusnya muncul `/play`, `/skip`,
+Buka server kamu, ketik `/` di kolom chat. Harusnya muncul `/play`, `/skip`,  
 `/radio`, dst.
 
-Kalau belum muncul: tunggu 10 detik lalu refresh Discord (**Ctrl+R**).
+Kalau belum muncul: tunggu 10 detik lalu refresh Discord (**Ctrl+R**).  
 Kalau tetap tidak ada, lihat log — apakah ada baris `slash command didaftarkan`.
 
 ---
@@ -273,6 +273,10 @@ INFO  [engine:lavalink] Lavalink siap: main@antimusic-production-a1b2.up.railway
 INFO  [client] Engine audio aktif: lavalink (main@...:443)
 ```
 
+> **Dengan Lavalink aktif, yt-dlp TIDAK dibutuhkan.** Pencarian dan pemutaran
+> ditangani Lavalink sepenuhnya. Kalau unduhan yt-dlp gagal (mis. GitHub 504),
+> abaikan saja — bot tetap normal dan mencoba ulang sendiri di background.
+
 Lalu di Discord:
 
 ```
@@ -300,32 +304,32 @@ Kalau bot masuk tapi **hening**:
 
 ### Command yang paling sering dipakai
 
-| Command | Fungsi |
-|---|---|
-| `/play <judul atau URL>` | putar lagu / playlist / link Spotify |
-| `/skip`, `/pause`, `/resume`, `/stop` | kontrol dasar |
-| `/queue`, `/nowplaying` | lihat antrian & progres |
-| `/volume 120` | volume 0–200% |
-| `/filter bassboost` | filter (nightcore, vaporwave, 8d, karaoke, treble, soft) |
-| `/loop queue`, `/shuffle` | pengulangan & acak |
-| `/radio start station:lofi` | radio 24/7 (bot nongkrong terus) |
-| `/engine status` | cek engine audio |
+| Command                               | Fungsi                                                   |
+| ------------------------------------- | -------------------------------------------------------- |
+| `/play <judul atau URL>`              | putar lagu / playlist / link Spotify                     |
+| `/skip`, `/pause`, `/resume`, `/stop` | kontrol dasar                                            |
+| `/queue`, `/nowplaying`               | lihat antrian & progres                                  |
+| `/volume 120`                         | volume 0–200%                                            |
+| `/filter bassboost`                   | filter (nightcore, vaporwave, 8d, karaoke, treble, soft) |
+| `/loop queue`, `/shuffle`             | pengulangan & acak                                       |
+| `/radio start station:lofi`           | radio 24/7 (bot nongkrong terus)                         |
+| `/engine status`                      | cek engine audio                                         |
 
 ---
 
 ## 6. Setelan kualitas audio
 
-Ini bagian yang sering disalahpahami. **Plafon kualitas ada di Discord, bukan di
+Ini bagian yang sering disalahpahami. **Plafon kualitas ada di Discord, bukan di  
 bot:**
 
 | Boost server | Bitrate voice maksimal |
-|---|---|
-| Tanpa boost | 96 kbps |
-| Tier 1 | 128 kbps |
-| Tier 2 | 256 kbps |
-| Tier 3 | 384 kbps |
+| ------------ | ---------------------- |
+| Tanpa boost  | 96 kbps                |
+| Tier 1       | 128 kbps               |
+| Tier 2       | 256 kbps               |
+| Tier 3       | 384 kbps               |
 
-**Naikkan dulu bitrate channel** (kalau server kamu boost):
+**Naikkan dulu bitrate channel** (kalau server kamu boost):  
 Server Settings → **Voice Channels** → pilih channel → **Bitrate** → geser maksimal.
 
 Setelah itu, dua knob di sisi Lavalink:
@@ -335,9 +339,10 @@ OPUS_ENCODING_QUALITY=10    # 0-10, 10 = terbaik
 RESAMPLING_QUALITY=HIGH     # LOW / MEDIUM / HIGH / VERY_HIGH
 ```
 
-Dan sumber audio: `LAVALINK_SEARCH_SOURCE=youtube` memberi audio Opus ~130–160 kbps,
-yang **lebih tinggi dari plafon Discord**. Jadi setelah channel dinaikkan, Discord-lah
+Dan sumber audio: `LAVALINK_SEARCH_SOURCE=youtube` memberi audio Opus ~130–160 kbps,  
+yang **lebih tinggi dari plafon Discord**. Jadi setelah channel dinaikkan, Discord-lah  
 yang jadi bottleneck, bukan bot.
+
 
 > Tanpa Lavalink (engine lokal), hasil audionya sama-sama Opus 48 kHz — bedanya
 > di stabilitas dan fitur filter, bukan kualitas puncak.
@@ -432,7 +437,9 @@ cocokkan dengan tabel di bawah.
 | `DISCORD_TOKEN kosong` | token tidak ada / salah nama variabel | Cek isi `.env`: `DISCORD_TOKEN=...` tanpa spasi, tanpa tanda kutip |
 | `ffmpeg: spawn ... ENOENT` | binary FFmpeg belum ada | Restart (bot unduh sendiri), atau `npm run install:ffmpeg` |
 | `npm warn allow-scripts` saat install | npm 11.7+ memblokir install script dependency | **Abaikan.** FFmpeg & yt-dlp diunduh oleh bot, bukan oleh dependency |
-| `yt-dlp tidak ditemukan` | binary belum ada | `npm run install:ytdlp` |
+| `yt-dlp tidak ditemukan` | binary belum ada | Kalau pakai Lavalink: **abaikan**, bot tetap jalan. Kalau engine lokal: `npm run install:ytdlp` |
+| `HTTP 504 saat mengunduh yt-dlp` | CDN GitHub releases sedang bermasalah (bukan salah kamu) | **Abaikan** kalau pakai Lavalink — bot mencari & memutar lewat Lavalink. Bot mencoba ulang otomatis tiap 5 menit. Cek status: <https://www.githubstatus.com> |
+| `HTTP 504` saat build Railway | sama, CDN GitHub | Klik **Redeploy**. Dockerfile sekarang retry 5x otomatis |
 | `Gagal connect ke voice channel (timeout)` | izin kurang / channel penuh | Beri izin **Connect** + **Speak** di channel itu |
 | `Lavalink tidak bisa dihubungi dalam 20s` | node mati / password beda / port salah | Cek log Railway; pastikan `LAVALINK_PASSWORD` sama persis, `LAVALINK_PORT=443`, `LAVALINK_SECURE=true` |
 | `401 Unauthorized` di log Railway | password bot ≠ password Lavalink | Samakan |

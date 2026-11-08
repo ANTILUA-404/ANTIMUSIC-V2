@@ -13,7 +13,9 @@ import {
 } from '@discordjs/voice';
 import { config } from '../config.js';
 import { createLogger } from '../utils/logger.js';
-import { spawnYtdlpAudio } from '../utils/ytdlp.js';
+import { relatedTracks, spawnYtdlpAudio } from '../utils/ytdlp.js';
+import { resolveQuery } from '../resolvers/index.js';
+import { Track } from '../structures/Track.js';
 import { FILTERS } from './filters.js';
 
 const log = createLogger('engine:local');
@@ -141,6 +143,19 @@ export class LocalEngine extends EventEmitter {
       if (newState.status === VoiceConnectionStatus.Destroyed) this.#kill(state);
     });
     connection.on('error', (error) => log.warn(`[${guildId}] voice: ${error.message}`));
+  }
+
+  /* -------------------------------- resolve ------------------------------ */
+
+  /** Resolver untuk /play — pakai yt-dlp (butuh binary yt-dlp). */
+  async resolve(input, options = {}) {
+    return resolveQuery(input, options);
+  }
+
+  /** Lagu terkait untuk autoplay (yt-dlp YouTube Mix). */
+  async related(videoId, limit = 5) {
+    const items = await relatedTracks(videoId, limit + 3);
+    return items.slice(0, limit).map((item) => Track.fromYtdlp(item, null, 'Autoplay'));
   }
 
   /* ------------------------------- playback ------------------------------ */

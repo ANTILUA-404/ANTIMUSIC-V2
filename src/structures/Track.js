@@ -20,6 +20,7 @@ export class Track {
     isLive = false,
     stream = null,
     playlist = null,
+    encoded = null,
   }) {
     this.title = title;
     this.url = url;
@@ -31,6 +32,8 @@ export class Track {
     this.isLive = Boolean(isLive) || this.duration === 0;
     this.stream = stream;
     this.playlist = playlist;
+    /** base64 track Lavalink (diisi setelah resolve pertama, biar tidak cari ulang) */
+    this.encoded = encoded;
     this.addedAt = Date.now();
   }
 
@@ -66,6 +69,28 @@ export class Track {
       isLive: data.isLive,
       stream: { kind: 'ytdlp', target: data.url },
       playlist,
+    });
+  }
+
+  /**
+   * Dari hasil pencarian Lavalink. `encoded` ikut disimpan supaya pemutaran
+   * berikutnya (loop/replay) tidak perlu query ke node lagi.
+   */
+  static fromLavalink(lavalinkTrack, requester, playlist = null) {
+    const info = lavalinkTrack?.info ?? {};
+    const isStream = Boolean(info.isStream) || info.duration === 0;
+    return new Track({
+      title: info.title ?? 'Tanpa judul',
+      url: info.uri ?? null,
+      duration: isStream ? 0 : Math.round((info.duration ?? 0) / 1000),
+      thumbnail: info.artworkUrl ?? null,
+      author: info.author ?? 'Unknown',
+      requester,
+      source: info.sourceName ?? 'lavalink',
+      isLive: isStream,
+      stream: { kind: 'lavalink', target: info.uri ?? info.identifier ?? null },
+      playlist,
+      encoded: lavalinkTrack?.encoded ?? null,
     });
   }
 
