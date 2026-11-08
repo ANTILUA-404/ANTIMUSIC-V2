@@ -15,6 +15,79 @@ Tidak ada Java, tidak ada JAR yang diunduh, tidak ada JVM yang dibunuh OS karena
 
 ---
 
+## 🏠 Kalau kamu pelanggan hosting panel (anjas.id, dsb.)
+
+Banyak penyedia Indonesia — termasuk **anjas.id** (panel `mc.anjas.id`) — menjual
+"Discord bot hosting" berbasis Pterodactyl. Di situ kamu **bukan admin panel**, jadi:
+
+- ❌ **tidak bisa** import egg → `deploy/pterodactyl-egg.json` tidak dipakai
+- ❌ **tidak bisa** mengubah startup command
+- ✅ **bisa** mengisi variabel di tab Startup, upload file, dan membaca console
+
+Kabar baiknya: untuk kasus ini kamu memang tidak butuh egg. Bot mengurus dirinya sendiri.
+
+### Langkahnya
+
+1. **Tab Startup** — pastikan nilainya:
+
+   | Variabel | Nilai | Kenapa |
+   |---|---|---|
+   | `MAIN_FILE` | `index.js` | entrypoint repo ini |
+   | `AUTO_UPDATE` | `1` | `git pull` tiap start (kalau project dari git) |
+   | Node image | Node.js 20 / 22 | minimal Node 20 |
+
+2. **Tab Files** — pastikan project ada di **root** container, bukan di subfolder:
+
+   ```
+   /home/container/index.js
+   /home/container/package.json
+   /home/container/src/
+   ```
+
+   Kalau hasil unzip masuk ke `antimusic/antimusic/...`, pindahkan isinya ke root.
+
+3. **Isi token** — tab Startup → `DISCORD_TOKEN`, atau tab Files → buat `.env`:
+
+   ```env
+   DISCORD_TOKEN=token_kamu
+   ```
+
+4. **Tekan Start.** Console akan menampilkan urutan ini:
+
+   ```
+   [bootstrap] node_modules belum ada — menjalankan npm install...
+   INFO [ffmpeg] FFmpeg siap dipakai: /home/container/bin/ffmpeg
+   INFO [yt-dlp] yt-dlp siap dipakai: /home/container/bin/yt-dlp
+   INFO [ready] Login sebagai ANTIMUSIC#7110 • 2 server • 18 command
+   INFO [commands] 18 slash command didaftarkan → guild 123... (instan)
+   ```
+
+   Slash command langsung muncul di Discord — tidak perlu `npm run deploy`.
+
+### Catatan khusus panel hosting
+
+| Hal | Penjelasan |
+|---|---|
+| **Jangan isi `HEALTH_PORT`** | Panel sudah menyuntikkan `SERVER_PORT`; kalau diisi bisa bentrok dan server dianggap mati |
+| **Console error `ts-node`** | Egg generik mendeteksi `MAIN_FILE` dengan pola `"*.js"` yang bisa salah. Set `MAIN_FILE=index.js`. Repo ini sudah menyertakan `tsconfig.json` + entrypoint tanpa top-level await supaya jalur ts-node tetap jalan |
+| **Update bot** | Kalau project dari git: `AUTO_UPDATE=1` lalu restart. Kalau upload ZIP: upload ulang, **jangan** hapus `data/` dan `.env` |
+| **Kuota disk** | FFmpeg ±28 MB + yt-dlp ±30 MB + `node_modules` ±80 MB |
+| **`npm run deploy`** | Tidak perlu — didaftarkan otomatis setiap start |
+| **Tidak bisa akses console?** | Tidak masalah, semua otomatis. Kalau perlu paksa install: restart saja, `index.js` menjalankan `npm install` sendiri |
+
+### Kalau panel membatasi waktu start
+
+`npm install` pertama kali butuh ±30–60 detik (belum termasuk unduh FFmpeg + yt-dlp).
+Kalau panel mematikan proses karena dianggap hang, jalankan sekali dari console:
+
+```bash
+npm install
+```
+
+lalu Start lagi. Setelah itu start berikutnya cepat karena semua sudah ada di disk.
+
+---
+
 ## ⚡ Cara tercepat: import egg (nol setup)
 
 1. Admin panel → **Nests** → **Import Egg** → pilih file `deploy/pterodactyl-egg.json`

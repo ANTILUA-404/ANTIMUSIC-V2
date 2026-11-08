@@ -62,6 +62,9 @@ Jadi yang perlu kamu lakukan cuma **satu**: memberi token.
 
 ### Paling cepat — import egg Pterodactyl
 
+> **Pelanggan hosting panel** (anjas.id, dsb.) tidak bisa import egg — itu normal.
+> Langkah khusus untuk kalian ada di [PTERODACTYL.md bagian 🏠](PTERODACTYL.md).
+
 1. Admin panel → **Nests** → **Import Egg** → pilih `deploy/pterodactyl-egg.json`
 2. **Create Server** pakai egg `ANTIMUSIC v3`
 3. Isi **Discord Bot Token** di tab Startup

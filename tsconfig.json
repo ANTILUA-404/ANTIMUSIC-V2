@@ -1,0 +1,17 @@
+// Hanya dipakai kalau panel menjalankan entrypoint lewat `ts-node --esm`
+// (egg Node.js generik). `node index.js` biasa mengabaikan file ini.
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowJs": true,
+    "checkJs": false,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["index.js", "start.js", "src/**/*.js"],
+  "exclude": ["node_modules", "bin", "data", "test"]
+}

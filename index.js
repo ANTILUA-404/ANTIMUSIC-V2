@@ -39,5 +39,16 @@ function ensureDependencies() {
 
 ensureDependencies();
 
-// Dynamic import: static import akan dieksekusi SEBELUM ensureDependencies().
-await import('./src/index.js');
+/**
+ * Dynamic import (bukan static) karena static import dieksekusi SEBELUM
+ * ensureDependencies().
+ *
+ * Sengaja TANPA top-level await: sebagian panel (egg Node.js generik) menjalankan
+ * entrypoint lewat `ts-node --esm`, dan TLA bisa gagal di jalur itu.
+ */
+(async () => {
+  await import('./src/index.js');
+})().catch((error) => {
+  console.error('[bootstrap] Gagal memuat bot:', error);
+  process.exit(1);
+});
